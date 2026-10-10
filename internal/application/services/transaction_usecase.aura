@@ -1,0 +1,425 @@
+// ==============================================================================
+// Application Layer: Transaction Use Case (Orquestador de Operaciones Financieras)
+// ==============================================================================
+
+import { Account } from "../../domain/model/account";
+import { Transaction, NewTransaction } from "../../domain/model/transaction";
+import { LedgerEntry, NewLedgerEntry } from "../../domain/model/ledger";
+import {
+  TX_TYPE_DEPOSIT,
+  TX_TYPE_WITHDRAWAL,
+  TX_TYPE_TRANSFER,
+  TX_STATUS_COMPLETED,
+  LEDGER_ENTRY_DEBIT,
+  LEDGER_ENTRY_CREDIT
+} from "../../domain/model/domain_types";
+import {
+  DepositDTO,
+  WithdrawDTO,
+  TransferDTO
+} from "../dto/wallet_dto";
+import {
+  AccountRepository,
+  TransactionRepository,
+  LedgerRepository,
+  NotificationService,
+  EventPublisher,
+  MetricsCollector,
+  AuditLogger
+} from "../interfaces";
+import { CurrencyExchangeService } from "../../domain/service/currency_exchange";
+import { FraudDetectorService } from "../../domain/service/fraud_detector";
+import { LedgerCalculatorService } from "../../domain/service/ledger_calculator";
+import {
+  NewDomainEvent,
+  EVENT_DEPOSIT_COMPLETED,
+  EVENT_WITHDRAWAL_COMPLETED,
+  EVENT_TRANSFER_COMPLETED,
+  EVENT_RISK_ALERT
+} from "../../domain/events";
+import {
+  ErrAccountNotFound,
+  ErrSameAccountTransfer,
+  ErrInvalidAmount
+} from "../../domain/errors";
+
+export struct TransactionUseCase {
+  __aura_type: String,
+  accountRepo: AccountRepository,
+  txRepo: TransactionRepository,
+  ledgerRepo: LedgerRepository,
+  exchangeSvc: CurrencyExchangeService,
+  fraudDetector: FraudDetectorService,
+  ledgerCalc: LedgerCalculatorService,
+  notifier: NotificationService,
+  eventPublisher: EventPublisher,
+  metrics: MetricsCollector,
+  audit: AuditLogger
+};
+
+export fn NewTransactionUseCase(
+  aRepo: AccountRepository,
+  tRepo: TransactionRepository,
+  lRepo: LedgerRepository,
+  exSvc: CurrencyExchangeService,
+  fdSvc: FraudDetectorService,
+  lcSvc: LedgerCalculatorService,
+  notif: NotificationService,
+  ep: EventPublisher,
+  m: MetricsCollector,
+  audit: AuditLogger
+): TransactionUseCase => {
+  return {
+    __aura_type: "TransactionUseCase",
+    accountRepo: aRepo,
+    txRepo: tRepo,
+    ledgerRepo: lRepo,
+    exchangeSvc: exSvc,
+    fraudDetector: fdSvc,
+    ledgerCalc: lcSvc,
+    notifier: notif,
+    eventPublisher: ep,
+    metrics: m,
+    audit: audit
+  };
+};
+
+// 1. Depósito de Dinero
+fn (uc: TransactionUseCase) ProcessDeposit(dto: DepositDTO, nowMs: Int): Result<Transaction, String> => {
+  let accRes = uc.accountRepo.FindById(dto.accountId);
+  match accRes {
+    Err(e) => Err(e),
+    Ok(account) => {
+      let depRes = account.Deposit(dto.amount, nowMs);
+      match depRes {
+        Err(e2) => Err(e2),
+        Ok(updatedAcc) => {
+          let updateRes = uc.accountRepo.Update(updatedAcc);
+          match updateRes {
+            Err(e3) => Err(e3),
+            Ok(_) => {
+              let txId = `tx-dep-${uc.txRepo.Count() + 1000}`;
+              let refCode = `DEP-${nowMs}`;
+              let desc = if (dto.description != "") { dto.description } else { "Depósito bancario en cuenta" };
+
+              let newTxRes = NewTransaction(
+                txId,
+                TX_TYPE_DEPOSIT(),
+                "EXTERNAL_BANK",
+                account.id,
+                dto.amount,
+                account.currency,
+                1.0,
+                dto.amount,
+                account.currency,
+                0.0,
+                TX_STATUS_COMPLETED(),
+                desc,
+                refCode,
+                0.0,
+                nowMs
+              );
+
+              match newTxRes {
+                Err(e4) => Err(e4),
+                Ok(tx) => {
+                  let _ = uc.txRepo.Save(tx);
+
+                  // Crear Asiento en Ledger (Crédito)
+                  let ledgerEntryNum = uc.ledgerRepo.Count() + 1;
+                  let ledgerId = `ldg-${ledgerEntryNum + 10000}`;
+                  let newEntryRes = NewLedgerEntry(
+                    ledgerEntryNum,
+                    ledgerId,
+                    tx.id,
+                    account.id,
+                    LEDGER_ENTRY_CREDIT(),
+                    dto.amount,
+                    account.currency,
+                    updatedAcc.balance,
+                    `Depósito procesado: +${dto.amount} ${account.currency}`,
+                    nowMs
+                  );
+                  match newEntryRes {
+                    Err(e5) => Err(e5),
+                    Ok(lEntry) => {
+                      let _ = uc.ledgerRepo.SaveEntry(lEntry);
+
+                      // Evento de Dominio
+                      let evt = NewDomainEvent(`evt-${nowMs}`, EVENT_DEPOSIT_COMPLETED(), account.id, `{"txId":"${tx.id}","amount":${dto.amount}}`, nowMs);
+                      let _ = uc.eventPublisher.Publish(evt);
+
+                      // Telemetría y Auditoría
+                      uc.metrics.IncrementCounter("transactions_processed_total", TX_TYPE_DEPOSIT());
+                      uc.metrics.RecordAmount("deposit_volume_total", dto.amount);
+                      uc.audit.LogAudit("DEPOSIT_PROCESSED", account.id, account.ownerEmail, `Depósito de ${dto.amount} ${account.currency} exitoso`, nowMs);
+
+                      Ok(tx)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// 2. Retiro de Dinero
+fn (uc: TransactionUseCase) ProcessWithdrawal(dto: WithdrawDTO, nowMs: Int): Result<Transaction, String> => {
+  let accRes = uc.accountRepo.FindById(dto.accountId);
+  match accRes {
+    Err(e) => Err(e),
+    Ok(account) => {
+      let withRes = account.Withdraw(dto.amount, nowMs);
+      match withRes {
+        Err(e2) => Err(e2),
+        Ok(updatedAcc) => {
+          let updateRes = uc.accountRepo.Update(updatedAcc);
+          match updateRes {
+            Err(e3) => Err(e3),
+            Ok(_) => {
+              let txId = `tx-wth-${uc.txRepo.Count() + 1000}`;
+              let refCode = `WTH-${nowMs}`;
+              let desc = if (dto.description != "") { dto.description } else { "Retiro de fondos hacia cuenta externa" };
+
+              let newTxRes = NewTransaction(
+                txId,
+                TX_TYPE_WITHDRAWAL(),
+                account.id,
+                "EXTERNAL_BANK",
+                dto.amount,
+                account.currency,
+                1.0,
+                dto.amount,
+                account.currency,
+                0.0,
+                TX_STATUS_COMPLETED(),
+                desc,
+                refCode,
+                0.0,
+                nowMs
+              );
+
+              match newTxRes {
+                Err(e4) => Err(e4),
+                Ok(tx) => {
+                  let _ = uc.txRepo.Save(tx);
+
+                  // Crear Asiento en Ledger (Débito)
+                  let ledgerEntryNum = uc.ledgerRepo.Count() + 1;
+                  let ledgerId = `ldg-${ledgerEntryNum + 10000}`;
+                  let newEntryRes = NewLedgerEntry(
+                    ledgerEntryNum,
+                    ledgerId,
+                    tx.id,
+                    account.id,
+                    LEDGER_ENTRY_DEBIT(),
+                    dto.amount,
+                    account.currency,
+                    updatedAcc.balance,
+                    `Retiro procesado: -${dto.amount} ${account.currency}`,
+                    nowMs
+                  );
+                  match newEntryRes {
+                    Err(e5) => Err(e5),
+                    Ok(lEntry) => {
+                      let _ = uc.ledgerRepo.SaveEntry(lEntry);
+
+                      // Evento de Dominio
+                      let evt = NewDomainEvent(`evt-${nowMs}`, EVENT_WITHDRAWAL_COMPLETED(), account.id, `{"txId":"${tx.id}","amount":${dto.amount}}`, nowMs);
+                      let _ = uc.eventPublisher.Publish(evt);
+
+                      // Telemetría y Auditoría
+                      uc.metrics.IncrementCounter("transactions_processed_total", TX_TYPE_WITHDRAWAL());
+                      uc.metrics.RecordAmount("withdrawal_volume_total", dto.amount);
+                      uc.audit.LogAudit("WITHDRAWAL_PROCESSED", account.id, account.ownerEmail, `Retiro de ${dto.amount} ${account.currency} exitoso`, nowMs);
+
+                      Ok(tx)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// 3. Transferencia entre Cuentas (Multidivisa, con Antifraude y Partida Doble)
+fn (uc: TransactionUseCase) ProcessTransfer(dto: TransferDTO, nowMs: Int): Result<Transaction, String> => {
+  let srcAccRes = uc.accountRepo.FindById(dto.sourceAccountId);
+  match srcAccRes {
+    Err(e) => Err(e),
+    Ok(srcAcc) => {
+      let dstAccRes = uc.accountRepo.FindByAccountNumber(dto.destinationAccountNumber);
+      match dstAccRes {
+        Err(e2) => Err(e2),
+        Ok(dstAcc) => {
+          if (srcAcc.id == dstAcc.id) {
+            return Err(ErrSameAccountTransfer());
+          }
+
+          // A. Evaluación de Riesgo y Fraude en Capa de Dominio
+          let riskRes = uc.fraudDetector.EvaluateRisk(dto.amount, srcAcc.currency, dstAcc.currency, srcAcc.dailyTransferred);
+          match riskRes {
+            Err(fraudErr) => {
+              uc.metrics.IncrementCounter("transactions_rejected_fraud", srcAcc.currency);
+              uc.audit.LogAudit("FRAUD_RISK_REJECTED", srcAcc.id, srcAcc.ownerEmail, fraudErr, nowMs);
+              let alertEvt = NewDomainEvent(`evt-risk-${nowMs}`, EVENT_RISK_ALERT(), srcAcc.id, `{"reason":"${fraudErr}"}`, nowMs);
+              let _ = uc.eventPublisher.Publish(alertEvt);
+              Err(fraudErr)
+            },
+            Ok(riskAssessment) => {
+              // B. Cálculo de Conversión y Comisiones
+              let rateRes = uc.exchangeSvc.GetExchangeRate(srcAcc.currency, dstAcc.currency);
+              match rateRes {
+                Err(rateErr) => Err(rateErr),
+                Ok(rate) => {
+                  let convertRes = uc.exchangeSvc.Convert(dto.amount, srcAcc.currency, dstAcc.currency);
+                  match convertRes {
+                    Err(convErr) => Err(convErr),
+                    Ok(targetAmount) => {
+                      let fee = uc.exchangeSvc.CalculateFee(dto.amount, srcAcc.currency, dstAcc.currency);
+                      let totalDebit = dto.amount + fee;
+
+                      // C. Actualizar Saldo Origen (Débito)
+                      let debitRes = srcAcc.CheckAndDebitTransfer(totalDebit, nowMs);
+                      match debitRes {
+                        Err(debitErr) => Err(debitErr),
+                        Ok(updatedSrcAcc) => {
+                          // D. Actualizar Saldo Destino (Crédito)
+                          let creditRes = dstAcc.Deposit(targetAmount, nowMs);
+                          match creditRes {
+                            Err(creditErr) => Err(creditErr),
+                            Ok(updatedDstAcc) => {
+                              // E. Persistir ambas cuentas
+                              let _ = uc.accountRepo.Update(updatedSrcAcc);
+                              let _ = uc.accountRepo.Update(updatedDstAcc);
+
+                              // F. Crear Registro de Transacción
+                              let txId = `tx-xfer-${uc.txRepo.Count() + 1000}`;
+                              let refCode = `TRF-${nowMs}`;
+                              let desc = if (dto.description != "") { dto.description } else { `Transferencia de ${srcAcc.ownerName} a ${dstAcc.ownerName}` };
+
+                              let newTxRes = NewTransaction(
+                                txId,
+                                TX_TYPE_TRANSFER(),
+                                srcAcc.id,
+                                dstAcc.id,
+                                dto.amount,
+                                srcAcc.currency,
+                                rate,
+                                targetAmount,
+                                dstAcc.currency,
+                                fee,
+                                TX_STATUS_COMPLETED(),
+                                desc,
+                                refCode,
+                                riskAssessment.score,
+                                nowMs
+                              );
+
+                              match newTxRes {
+                                Err(txErr) => Err(txErr),
+                                Ok(tx) => {
+                                  let _ = uc.txRepo.Save(tx);
+
+                                  // G. Partida Doble en Libro Mayor (Ledger)
+                                  let entry1Num = uc.ledgerRepo.Count() + 1;
+                                  let ldg1Id = `ldg-${entry1Num + 10000}`;
+                                  let debitEntryRes = NewLedgerEntry(
+                                    entry1Num,
+                                    ldg1Id,
+                                    tx.id,
+                                    srcAcc.id,
+                                    LEDGER_ENTRY_DEBIT(),
+                                    totalDebit,
+                                    srcAcc.currency,
+                                    updatedSrcAcc.balance,
+                                    `Débito por transferencia a ${dstAcc.accountNumber}`,
+                                    nowMs
+                                  );
+
+                                  match debitEntryRes {
+                                    Err(dErr) => Err(dErr),
+                                    Ok(debitLdg) => {
+                                      let entry2Num = entry1Num + 1;
+                                      let ldg2Id = `ldg-${entry2Num + 10000}`;
+                                      let creditEntryRes = NewLedgerEntry(
+                                        entry2Num,
+                                        ldg2Id,
+                                        tx.id,
+                                        dstAcc.id,
+                                        LEDGER_ENTRY_CREDIT(),
+                                        targetAmount,
+                                        dstAcc.currency,
+                                        updatedDstAcc.balance,
+                                        `Crédito recibido de ${srcAcc.accountNumber}`,
+                                        nowMs
+                                      );
+
+                                      match creditEntryRes {
+                                        Err(cErr) => Err(cErr),
+                                        Ok(creditLdg) => {
+                                          // Validar consistencia del par de asientos
+                                          let _ = uc.ledgerCalc.VerifyTransferPair(debitLdg, creditLdg);
+                                          let _ = uc.ledgerRepo.SaveEntry(debitLdg);
+                                          let _ = uc.ledgerRepo.SaveEntry(creditLdg);
+
+                                          // H. Publicar Evento de Dominio
+                                          let payload = `{"txId":"${tx.id}","from":"${srcAcc.accountNumber}","to":"${dstAcc.accountNumber}","amount":${dto.amount},"targetAmount":${targetAmount},"fee":${fee}}`;
+                                          let transferEvt = NewDomainEvent(`evt-${nowMs}`, EVENT_TRANSFER_COMPLETED(), srcAcc.id, payload, nowMs);
+                                          let _ = uc.eventPublisher.Publish(transferEvt);
+
+                                          // I. Notificaciones a los usuarios
+                                          let _ = uc.notifier.SendTransferNotification(srcAcc.ownerEmail, tx.id, dto.amount, srcAcc.currency, `Enviado a ${dstAcc.ownerName}`);
+                                          let _ = uc.notifier.SendTransferNotification(dstAcc.ownerEmail, tx.id, targetAmount, dstAcc.currency, `Recibido de ${srcAcc.ownerName}`);
+
+                                          // J. Telemetría y Auditoría
+                                          uc.metrics.IncrementCounter("transactions_processed_total", TX_TYPE_TRANSFER());
+                                          uc.metrics.RecordAmount("transfer_volume_total", dto.amount);
+                                          uc.audit.LogAudit("TRANSFER_COMPLETED", srcAcc.id, srcAcc.ownerEmail, `Transferencia ${tx.id} de ${dto.amount} ${srcAcc.currency} -> ${targetAmount} ${dstAcc.currency} (Comisión: ${fee})`, nowMs);
+
+                                          Ok(tx)
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn (uc: TransactionUseCase) GetTransactionById(id: String): Result<Transaction, String> => {
+  uc.txRepo.FindById(id)
+}
+
+fn (uc: TransactionUseCase) ListAccountTransactions(accId: String, limit: Int): Result<[]Transaction, String> => {
+  uc.txRepo.FindByAccountId(accId, limit)
+}
+
+fn (uc: TransactionUseCase) ListRecentTransactions(limit: Int): Result<[]Transaction, String> => {
+  uc.txRepo.ListRecent(limit)
+}
+
+fn (uc: TransactionUseCase) GetTotalCount(): Int => {
+  uc.txRepo.Count()
+}

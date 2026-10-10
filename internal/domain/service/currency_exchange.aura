@@ -1,0 +1,83 @@
+// ==============================================================================
+// Domain Layer: Currency Exchange Domain Service (Conversión Multidivisa)
+// ==============================================================================
+
+import {
+  CURRENCY_USD,
+  CURRENCY_EUR,
+  CURRENCY_GBP,
+  CURRENCY_CLP,
+  CURRENCY_BRL
+} from "../model/domain_types";
+import { ErrInvalidCurrency, ErrInvalidAmount } from "../errors";
+
+export struct CurrencyExchangeService {
+  __aura_type: String
+};
+
+export fn NewCurrencyExchangeService(): CurrencyExchangeService => {
+  return {
+    __aura_type: "CurrencyExchangeService"
+  };
+};
+
+// Retorna la tasa base respecto a USD
+fn (s: CurrencyExchangeService) GetUsdRate(currency: String): Result<Float, String> => {
+  if (currency == CURRENCY_USD()) { return Ok(1.0); }
+  if (currency == CURRENCY_EUR()) { return Ok(0.92); }
+  if (currency == CURRENCY_GBP()) { return Ok(0.79); }
+  if (currency == CURRENCY_CLP()) { return Ok(950.0); }
+  if (currency == CURRENCY_BRL()) { return Ok(5.50); }
+  Err(ErrInvalidCurrency())
+}
+
+// Obtiene la tasa de conversión directa entre dos monedas
+fn (s: CurrencyExchangeService) GetExchangeRate(fromCurrency: String, toCurrency: String): Result<Float, String> => {
+  if (fromCurrency == toCurrency) {
+    return Ok(1.0);
+  }
+
+  let fromUsdRes = s.GetUsdRate(fromCurrency);
+  match fromUsdRes {
+    Err(e) => Err(e),
+    Ok(fromRate) => {
+      let toUsdRes = s.GetUsdRate(toCurrency);
+      match toUsdRes {
+        Err(e2) => Err(e2),
+        Ok(toRate) => {
+          let crossRate = toRate / fromRate;
+          Ok(crossRate)
+        }
+      }
+    }
+  }
+}
+
+// Convierte un monto de una moneda a otra
+fn (s: CurrencyExchangeService) Convert(amount: Float, fromCurrency: String, toCurrency: String): Result<Float, String> => {
+  if (amount <= 0.0) {
+    return Err(ErrInvalidAmount());
+  }
+  if (fromCurrency == toCurrency) {
+    return Ok(amount);
+  }
+
+  let rateRes = s.GetExchangeRate(fromCurrency, toCurrency);
+  match rateRes {
+    Err(e) => Err(e),
+    Ok(rate) => {
+      let converted = amount * rate;
+      Ok(converted)
+    }
+  }
+}
+
+// Calcula la comisión de transacción (ej. 0.25% para transferencias con cambio de divisa, o base 0.0)
+fn (s: CurrencyExchangeService) CalculateFee(amount: Float, fromCurrency: String, toCurrency: String): Float => {
+  if (fromCurrency != toCurrency) {
+    // 0.25% de tarifa de conversión FX
+    amount * 0.0025
+  } else {
+    0.0
+  }
+}

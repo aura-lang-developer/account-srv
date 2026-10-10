@@ -1,0 +1,161 @@
+// ==============================================================================
+// Unit Tests: Domain Layer Models & Domain Services
+// ==============================================================================
+
+import { Account, NewAccount } from "../internal/domain/model/account";
+import {
+  CURRENCY_USD,
+  CURRENCY_EUR,
+  ACCOUNT_STATUS_ACTIVE,
+  ACCOUNT_STATUS_FROZEN,
+  LEDGER_ENTRY_DEBIT,
+  LEDGER_ENTRY_CREDIT
+} from "../internal/domain/model/domain_types";
+import { NewCurrencyExchangeService } from "../internal/domain/service/currency_exchange";
+import { NewFraudDetectorService } from "../internal/domain/service/fraud_detector";
+import { NewLedgerCalculatorService } from "../internal/domain/service/ledger_calculator";
+import { NewLedgerEntry } from "../internal/domain/model/ledger";
+
+export fn main(): Unit => {
+  let nowMs = 1700000000000;
+  let mut passed = 0;
+  let mut failed = 0;
+
+  println("================================================================================");
+  println("  🧪 EJECUTANDO PRUEBAS UNITARIAS: CAPA DE DOMINIO");
+  println("================================================================================");
+
+  // Test 1: Creación de Cuenta con Invariantes Válidos
+  println("\n[TEST 1] Invariantes de Creación de Cuenta:");
+  let accRes = NewAccount("acc-1", "CTA-100", "Alice", "alice@test.com", CURRENCY_USD(), 1000.0, 5000.0, nowMs);
+  match accRes {
+    Ok(acc) => {
+      if (acc.balance == 1000.0 && acc.status == ACCOUNT_STATUS_ACTIVE()) {
+        println("  ✓ PASS: Cuenta creada con saldo y estado activo");
+        passed = passed + 1;
+      } else {
+        println("  ✕ FAIL: Atributos de cuenta incorrectos");
+        failed = failed + 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Error inesperado -> ${e}`);
+      failed = failed + 1;
+    }
+  };
+
+  // Test 2: Invariante de Retiro con Fondos Insuficientes
+  println("\n[TEST 2] Invariante de Retiro con Fondos Insuficientes:");
+  match accRes {
+    Ok(acc) => {
+      let withRes = acc.Withdraw(5000.0, nowMs);
+      match withRes {
+        Ok(_) => {
+          println("  ✕ FAIL: Se permitió retiro superior al saldo disponible");
+          failed = failed + 1;
+        },
+        Err(e) => {
+          println(`  ✓ PASS: Rechazo correcto por fondos insuficientes -> ${e}`);
+          passed = passed + 1;
+        }
+      }
+    },
+    Err(_) => ()
+  };
+
+  // Test 3: Invariante de Cuenta Congelada
+  println("\n[TEST 3] Invariante de Operaciones en Cuenta Congelada:");
+  match accRes {
+    Ok(acc) => {
+      let freezeRes = acc.Freeze("Sospecha de fraude", nowMs);
+      match freezeRes {
+        Ok(frozenAcc) => {
+          let depRes = frozenAcc.Deposit(100.0, nowMs);
+          match depRes {
+            Ok(_) => {
+              println("  ✕ FAIL: Se permitió depósito en cuenta congelada");
+              failed = failed + 1;
+            },
+            Err(e) => {
+              println(`  ✓ PASS: Operación bloqueada en cuenta congelada -> ${e}`);
+              passed = passed + 1;
+            }
+          }
+        },
+        Err(e) => {
+          println(`  ✕ FAIL: Error al congelar -> ${e}`);
+          failed = failed + 1;
+        }
+      }
+    },
+    Err(_) => ()
+  };
+
+  // Test 4: Servicio de Dominio - Conversión de Moneda (FX)
+  println("\n[TEST 4] Servicio de Dominio: Conversión de Divisas (FX):");
+  let fxService = NewCurrencyExchangeService();
+  let rateRes = fxService.GetExchangeRate(CURRENCY_USD(), CURRENCY_EUR());
+  match rateRes {
+    Ok(rate) => {
+      if (rate > 0.90 && rate < 0.95) {
+        println(`  ✓ PASS: Tasa USD/EUR calculada correctamente: ${rate}`);
+        passed = passed + 1;
+      } else {
+        println(`  ✕ FAIL: Tasa USD/EUR fuera de rango esperado: ${rate}`);
+        failed = failed + 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Error al obtener tasa -> ${e}`);
+      failed = failed + 1;
+    }
+  };
+
+  // Test 5: Servicio de Dominio - Motor Antifraude
+  println("\n[TEST 5] Servicio de Dominio: Detección de Fraude por Alto Monto:");
+  let fraudService = NewFraudDetectorService(0.85);
+  let riskRes = fraudService.EvaluateRisk(100000.0, CURRENCY_USD(), CURRENCY_EUR(), 30000.0);
+  match riskRes {
+    Ok(_) => {
+      println("  ✕ FAIL: Transacción de alto riesgo no fue rechazada");
+      failed = failed + 1;
+    },
+    Err(e) => {
+      println(`  ✓ PASS: Transacción de alto riesgo rechazada exitosamente -> ${e}`);
+      passed = passed + 1;
+    }
+  };
+
+  // Test 6: Servicio de Dominio - Reconciliación de Libro Mayor
+  println("\n[TEST 6] Servicio de Dominio: Reconciliación de Partida Doble (Ledger):");
+  let calcService = NewLedgerCalculatorService();
+
+  let entry1Res = NewLedgerEntry(1, "ldg-1", "tx-1", "acc-1", LEDGER_ENTRY_DEBIT(), 500.0, "USD", 500.0, "Débito", nowMs);
+  let entry2Res = NewLedgerEntry(2, "ldg-2", "tx-1", "acc-2", LEDGER_ENTRY_CREDIT(), 500.0, "USD", 1500.0, "Crédito", nowMs);
+
+  match entry1Res {
+    Ok(e1) => {
+      match entry2Res {
+        Ok(e2) => {
+          let pairRes = calcService.VerifyTransferPair(e1, e2);
+          match pairRes {
+            Ok(_) => {
+              println("  ✓ PASS: Par de asientos Débito/Crédito verificado con éxito");
+              passed = passed + 1;
+            },
+            Err(e) => {
+              println(`  ✕ FAIL: Verificación de par falló -> ${e}`);
+              failed = failed + 1;
+            }
+          }
+        },
+        Err(_) => ()
+      }
+    },
+    Err(_) => ()
+  };
+
+  println("--------------------------------------------------------------------------------");
+  println(`  📊 RESULTADOS: ${passed} PASSED | ${failed} FAILED`);
+  println("================================================================================");
+};

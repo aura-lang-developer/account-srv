@@ -1,0 +1,67 @@
+// ==============================================================================
+// Infrastructure Layer: In-Memory Ledger Repository (Append-Only Ledger)
+// ==============================================================================
+
+import { LedgerEntry } from "../../domain/model/ledger";
+
+export struct InMemoryLedgerRepository {
+  __aura_type: String,
+  entries: []LedgerEntry,
+  mu: Mutex
+};
+
+export fn NewInMemoryLedgerRepository(): InMemoryLedgerRepository => {
+  let empty: []LedgerEntry = [];
+  return {
+    __aura_type: "InMemoryLedgerRepository",
+    entries: empty,
+    mu: Mutex.new()
+  };
+};
+
+fn (r: InMemoryLedgerRepository) Count(): Int => {
+  r.mu.lock();
+  defer r.mu.unlock();
+  len(r.entries)
+}
+
+fn (r: InMemoryLedgerRepository) SaveEntry(entry: LedgerEntry): Result<Unit, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  r.entries = append(r.entries, entry);
+  Ok(())
+}
+
+fn (r: InMemoryLedgerRepository) FindByAccountId(accId: String): Result<[]LedgerEntry, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  let mut matched: []LedgerEntry = [];
+  for e in r.entries {
+    if (e.accountId == accId) {
+      matched = append(matched, e);
+    }
+  }
+  Ok(matched)
+}
+
+fn (r: InMemoryLedgerRepository) FindByTransactionId(txId: String): Result<[]LedgerEntry, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  let mut matched: []LedgerEntry = [];
+  for e in r.entries {
+    if (e.transactionId == txId) {
+      matched = append(matched, e);
+    }
+  }
+  Ok(matched)
+}
+
+fn (r: InMemoryLedgerRepository) ListAll(): Result<[]LedgerEntry, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  Ok(r.entries)
+}

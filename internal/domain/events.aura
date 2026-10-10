@@ -1,0 +1,30 @@
+// ==============================================================================
+// Domain Layer: Domain Events (Eventos de Dominio - Pub/Sub)
+// ==============================================================================
+
+export struct DomainEvent {
+  eventId: String,
+  eventType: String,
+  aggregateId: String,
+  payload: String,
+  timestampMs: Int
+};
+
+export fn NewDomainEvent(eventId: String, eventType: String, aggregateId: String, payload: String, timestampMs: Int): DomainEvent => {
+  return {
+    eventId: eventId,
+    eventType: eventType,
+    aggregateId: aggregateId,
+    payload: payload,
+    timestampMs: timestampMs
+  };
+};
+
+// Nombres de Eventos de Dominio
+export fn EVENT_ACCOUNT_CREATED(): String => "account.created";
+export fn EVENT_ACCOUNT_FROZEN(): String => "account.frozen";
+export fn EVENT_ACCOUNT_UNFROZEN(): String => "account.unfrozen";
+export fn EVENT_DEPOSIT_COMPLETED(): String => "deposit.completed";
+export fn EVENT_WITHDRAWAL_COMPLETED(): String => "withdrawal.completed";
+export fn EVENT_TRANSFER_COMPLETED(): String => "transfer.completed";
+export fn EVENT_RISK_ALERT(): String => "risk.alert";

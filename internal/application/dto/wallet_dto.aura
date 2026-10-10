@@ -1,0 +1,44 @@
+// ==============================================================================
+// Application Layer: Data Transfer Objects (DTOs & Command Models)
+// ==============================================================================
+
+import { Account } from "../../domain/model/account";
+import { Transaction } from "../../domain/model/transaction";
+
+export struct CreateAccountDTO {
+  ownerName: String,
+  ownerEmail: String,
+  currency: String,
+  initialBalance: Float,
+  dailyLimit: Float
+};
+
+export struct DepositDTO {
+  accountId: String,
+  amount: Float,
+  description: String
+};
+
+export struct WithdrawDTO {
+  accountId: String,
+  amount: Float,
+  description: String
+};
+
+export struct TransferDTO {
+  sourceAccountId: String,
+  destinationAccountNumber: String,
+  amount: Float,
+  description: String
+};
+
+export struct FreezeAccountDTO {
+  accountId: String,
+  reason: String
+};
+
+export struct AccountSummaryDTO {
+  account: Account,
+  recentTransactions: []Transaction,
+  ledgerEntriesCount: Int
+};

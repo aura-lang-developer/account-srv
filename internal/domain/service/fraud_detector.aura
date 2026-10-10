@@ -1,0 +1,72 @@
+// ==============================================================================
+// Domain Layer: Fraud Detector & Risk Domain Service (Motor Antifraude)
+// ==============================================================================
+
+import { ErrFraudRiskRejected } from "../errors";
+
+export struct RiskAssessment {
+  score: Float,
+  level: String,
+  requiresReview: Bool,
+  reason: String
+};
+
+export struct FraudDetectorService {
+  __aura_type: String,
+  highRiskThreshold: Float
+};
+
+export fn NewFraudDetectorService(threshold: Float): FraudDetectorService => {
+  let th = if (threshold <= 0.0) { 0.85 } else { threshold };
+  return {
+    __aura_type: "FraudDetectorService",
+    highRiskThreshold: th
+  };
+};
+
+fn (s: FraudDetectorService) EvaluateRisk(
+  amount: Float,
+  fromCurrency: String,
+  toCurrency: String,
+  senderDailyTransferred: Float
+): Result<RiskAssessment, String> => {
+  let mut score: Float = 0.05; // Riesgo basal
+  let mut reason = "Operación normal";
+
+  // 1. Análisis de volumen
+  if (amount >= 50000.0) {
+    score = score + 0.45;
+    reason = "Alto monto unitario";
+  } else if (amount >= 10000.0) {
+    score = score + 0.20;
+    reason = "Monto moderadamente alto";
+  }
+
+  // 2. Análisis multidivisa FX
+  if (fromCurrency != toCurrency) {
+    score = score + 0.15;
+  }
+
+  // 3. Análisis de velocidad diaria acumulada
+  if (senderDailyTransferred >= 20000.0) {
+    score = score + 0.25;
+    reason = `${reason} + Alta velocidad diaria acumulada`;
+  }
+
+  // Comprobación de umbrales
+  if (score >= s.highRiskThreshold) {
+    return Err(`${ErrFraudRiskRejected()} (Score: ${score}, Razón: ${reason})`);
+  }
+
+  let isHigh = score >= 0.50;
+  let level = if (isHigh) { "HIGH_ALERT" } else { "NORMAL" };
+
+  let assessment: RiskAssessment = {
+    score: score,
+    level: level,
+    requiresReview: isHigh,
+    reason: reason
+  };
+
+  Ok(assessment)
+}

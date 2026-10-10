@@ -1,0 +1,76 @@
+// ==============================================================================
+// Presentation Layer: HTTP REST Router (Enrutamiento Declarativo)
+// ==============================================================================
+
+import { Request, Response } from "./http_types";
+import { WalletHttpHandler } from "./handler";
+
+export fn RegisterRoutes(mux: Any, handler: WalletHttpHandler): Unit => {
+  // 1. Endpoints de Sistema, Monitoreo y Auditoría
+  mux.get("/health", fn(req: Request, res: Response) => {
+    handler.HandleHealth(req, res);
+  });
+
+  mux.get("/metrics", fn(req: Request, res: Response) => {
+    handler.HandleMetrics(req, res);
+  });
+
+  mux.get("/audit", fn(req: Request, res: Response) => {
+    handler.HandleAuditLogs(req, res);
+  });
+
+  // 2. Recursos de Billeteras / Cuentas
+  mux.post("/api/v1/accounts", fn(req: Request, res: Response) => {
+    handler.HandleCreateAccount(req, res);
+  });
+
+  mux.get("/api/v1/accounts", fn(req: Request, res: Response) => {
+    handler.HandleListAccounts(req, res);
+  });
+
+  mux.get("/api/v1/accounts/{id}", fn(req: Request, res: Response) => {
+    handler.HandleGetAccount(req, res);
+  });
+
+  mux.post("/api/v1/accounts/{id}/freeze", fn(req: Request, res: Response) => {
+    handler.HandleFreezeAccount(req, res);
+  });
+
+  mux.post("/api/v1/accounts/{id}/unfreeze", fn(req: Request, res: Response) => {
+    handler.HandleUnfreezeAccount(req, res);
+  });
+
+  // 3. Operaciones Financieras y Transacciones
+  mux.post("/api/v1/transactions/deposit", fn(req: Request, res: Response) => {
+    handler.HandleDeposit(req, res);
+  });
+
+  mux.post("/api/v1/transactions/withdraw", fn(req: Request, res: Response) => {
+    handler.HandleWithdrawal(req, res);
+  });
+
+  mux.post("/api/v1/transactions/transfer", fn(req: Request, res: Response) => {
+    handler.HandleTransfer(req, res);
+  });
+
+  mux.get("/api/v1/transactions", fn(req: Request, res: Response) => {
+    handler.HandleListTransactions(req, res);
+  });
+
+  mux.get("/api/v1/transactions/{id}", fn(req: Request, res: Response) => {
+    handler.HandleGetTransaction(req, res);
+  });
+
+  // 4. Libro Mayor (Ledger) y Reconciliación
+  mux.get("/api/v1/ledger", fn(req: Request, res: Response) => {
+    handler.HandleListLedger(req, res);
+  });
+
+  mux.get("/api/v1/ledger/accounts/{id}", fn(req: Request, res: Response) => {
+    handler.HandleGetAccountLedger(req, res);
+  });
+
+  mux.get("/api/v1/ledger/accounts/{id}/reconcile", fn(req: Request, res: Response) => {
+    handler.HandleReconcileAccount(req, res);
+  });
+};

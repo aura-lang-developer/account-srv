@@ -1,0 +1,122 @@
+// ==============================================================================
+// Integration Tests: Complete Onion Architecture Microservice Integration
+// ==============================================================================
+
+import { LoadConfig } from "../internal/infrastructure/config/config";
+
+import { NewCurrencyExchangeService } from "../internal/domain/service/currency_exchange";
+import { NewFraudDetectorService } from "../internal/domain/service/fraud_detector";
+import { NewLedgerCalculatorService } from "../internal/domain/service/ledger_calculator";
+
+import { NewInMemoryAccountRepository } from "../internal/infrastructure/persistence/inmemory_account_repo";
+import { NewInMemoryTransactionRepository } from "../internal/infrastructure/persistence/inmemory_transaction_repo";
+import { NewInMemoryLedgerRepository } from "../internal/infrastructure/persistence/inmemory_ledger_repo";
+import { NewEmailNotifier } from "../internal/infrastructure/external/email_notifier";
+import { NewAsyncEventBus } from "../internal/infrastructure/messaging/async_event_bus";
+import { NewPrometheusMetricsAdapter } from "../internal/infrastructure/external/prometheus_metrics";
+import { NewSecurityAuditAdapter } from "../internal/infrastructure/external/audit_logger";
+
+import { NewWalletUseCase } from "../internal/application/services/wallet_usecase";
+import { NewTransactionUseCase } from "../internal/application/services/transaction_usecase";
+import { NewLedgerUseCase } from "../internal/application/services/ledger_usecase";
+
+import { NewWalletHttpHandler } from "../internal/presentation/http/handler";
+import { NewCliRunner } from "../internal/presentation/cli/cli_runner";
+
+import {
+  CreateAccountDTO,
+  DepositDTO,
+  TransferDTO
+} from "../internal/application/dto/wallet_dto";
+import {
+  CURRENCY_USD,
+  CURRENCY_EUR,
+  CURRENCY_CLP
+} from "../internal/domain/model/domain_types";
+
+export fn main(): Unit => {
+  let nowMs = 1700000000000;
+  let mut passed = 0;
+  let mut failed = 0;
+
+  println("================================================================================");
+  println("  🧅 PRUEBA DE INTEGRACIÓN END-TO-END: MICROSERVICIO ONION (AURA LANG)");
+  println("================================================================================");
+
+  // 1. Cargar Configuración
+  let config = LoadConfig();
+  println(`[INTEGRATION] 1. Configuración cargada: ${config.serviceName} (${config.environment})`);
+
+  // 2. Instanciar Capas Concéntricas de Onion
+  let exchangeService = NewCurrencyExchangeService();
+  let fraudDetector = NewFraudDetectorService(config.riskThreshold);
+  let ledgerCalculator = NewLedgerCalculatorService();
+
+  let accountRepo = NewInMemoryAccountRepository();
+  let txRepo = NewInMemoryTransactionRepository();
+  let ledgerRepo = NewInMemoryLedgerRepository();
+  let emailNotifier = NewEmailNotifier("notifications.test-onion.org");
+  let eventBus = NewAsyncEventBus();
+  let metricsAdapter = NewPrometheusMetricsAdapter();
+  let auditAdapter = NewSecurityAuditAdapter();
+
+  let walletUseCase = NewWalletUseCase(accountRepo, eventBus, metricsAdapter, auditAdapter);
+  let txUseCase = NewTransactionUseCase(
+    accountRepo,
+    txRepo,
+    ledgerRepo,
+    exchangeService,
+    fraudDetector,
+    ledgerCalculator,
+    emailNotifier,
+    eventBus,
+    metricsAdapter,
+    auditAdapter
+  );
+  let ledgerUseCase = NewLedgerUseCase(accountRepo, ledgerRepo, ledgerCalculator, auditAdapter);
+
+  let httpHandler = NewWalletHttpHandler(walletUseCase, txUseCase, ledgerUseCase, metricsAdapter, auditAdapter);
+  let cliRunner = NewCliRunner(walletUseCase, txUseCase, ledgerUseCase, metricsAdapter, auditAdapter);
+
+  // Test 1: Comprobar inicialización completa de capas
+  println("\n[INTEGRATION 1] Verificando Composición de la Arquitectura:");
+  if (walletUseCase.GetTotalCount() == 0 && txUseCase.GetTotalCount() == 0 && ledgerUseCase.GetTotalCount() == 0) {
+    println("  ✓ PASS: Todas las capas inicializadas con estado limpio (0 cuentas, 0 transacciones, 0 asientos)");
+    passed = passed + 1;
+  } else {
+    println("  ✕ FAIL: Estado inicial no vacío");
+    failed = failed + 1;
+  }
+
+  // Test 2: Ejecución del Flujo Completo via CLI Runner
+  println("\n[INTEGRATION 2] Ejecutando Flujo Completo End-to-End via CliRunner:");
+  cliRunner.RunLiveDemo();
+
+  // Test 3: Verificación de Estado Global del Microservicio Post-Ejecución
+  println("\n[INTEGRATION 3] Verificando Consistencia Global del Microservicio:");
+  let totalAccounts = walletUseCase.GetTotalCount();
+  let totalTransactions = txUseCase.GetTotalCount();
+  let totalLedgerEntries = ledgerUseCase.GetTotalCount();
+  let metricsSummary = metricsAdapter.GetMetricsSummary();
+  let totalAuditLogs = auditAdapter.Count();
+
+  if (totalAccounts == 3 && totalTransactions == 2 && totalLedgerEntries == 3 && totalAuditLogs >= 4) {
+    println("  ✓ PASS: Consistencia Global Verificada:");
+    println(`      • Cuentas Totales en Sistema:   ${totalAccounts} / 3`);
+    println(`      • Transacciones Persistidas:    ${totalTransactions} / 2`);
+    println(`      • Asientos en Libro Mayor:      ${totalLedgerEntries} / 3`);
+    println(`      • Eventos y Logs de Auditoría:  ${totalAuditLogs}`);
+    println(`      • Volumen Procesado (Telemetría): $${metricsSummary.totalVolumeProcessed}`);
+    passed = passed + 1;
+  } else {
+    println(`  ✕ FAIL: Estado global no coincide: accounts=${totalAccounts}, txs=${totalTransactions}, ledger=${totalLedgerEntries}, logs=${totalAuditLogs}`);
+    failed = failed + 1;
+  }
+
+  println("--------------------------------------------------------------------------------");
+  println(`  📊 RESULTADOS: ${passed} PASSED | ${failed} FAILED`);
+  println("================================================================================");
+  if (failed == 0) {
+    println("  🎉 ¡TODAS LAS PRUEBAS DE INTEGRACIÓN ONION PASARON EXITOSAMENTE!\n");
+  }
+};

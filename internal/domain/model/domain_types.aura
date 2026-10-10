@@ -1,0 +1,32 @@
+// ==============================================================================
+// Domain Layer: Enums and Constant Types (Estilo Golang)
+// ==============================================================================
+
+// Monedas soportadas por el sistema
+export fn CURRENCY_USD(): String => "USD";
+export fn CURRENCY_EUR(): String => "EUR";
+export fn CURRENCY_GBP(): String => "GBP";
+export fn CURRENCY_CLP(): String => "CLP";
+export fn CURRENCY_BRL(): String => "BRL";
+
+// Estados de una Cuenta / Billetera
+export fn ACCOUNT_STATUS_ACTIVE(): String => "ACTIVE";
+export fn ACCOUNT_STATUS_FROZEN(): String => "FROZEN";
+export fn ACCOUNT_STATUS_CLOSED(): String => "CLOSED";
+
+// Tipos de Transacción
+export fn TX_TYPE_DEPOSIT(): String => "DEPOSIT";
+export fn TX_TYPE_WITHDRAWAL(): String => "WITHDRAWAL";
+export fn TX_TYPE_TRANSFER(): String => "TRANSFER";
+export fn TX_TYPE_FEE(): String => "FEE";
+export fn TX_TYPE_ADJUSTMENT(): String => "ADJUSTMENT";
+
+// Estados de Transacción
+export fn TX_STATUS_PENDING(): String => "PENDING";
+export fn TX_STATUS_COMPLETED(): String => "COMPLETED";
+export fn TX_STATUS_REJECTED(): String => "REJECTED";
+export fn TX_STATUS_REVERSED(): String => "REVERSED";
+
+// Tipos de Asiento Contable (Libro Mayor / Ledger)
+export fn LEDGER_ENTRY_DEBIT(): String => "DEBIT";
+export fn LEDGER_ENTRY_CREDIT(): String => "CREDIT";

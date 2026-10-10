@@ -1,0 +1,183 @@
+// ==============================================================================
+// Presentation Layer: CLI Workflow Runner (Demostración y Simulación de Tráfico)
+// ==============================================================================
+
+import { WalletUseCase } from "../../application/services/wallet_usecase";
+import { TransactionUseCase } from "../../application/services/transaction_usecase";
+import { LedgerUseCase } from "../../application/services/ledger_usecase";
+import { PrometheusMetricsAdapter } from "../../infrastructure/external/prometheus_metrics";
+import { SecurityAuditAdapter } from "../../infrastructure/external/audit_logger";
+import {
+  CreateAccountDTO,
+  DepositDTO,
+  WithdrawDTO,
+  TransferDTO
+} from "../../application/dto/wallet_dto";
+import {
+  CURRENCY_USD,
+  CURRENCY_EUR,
+  CURRENCY_CLP
+} from "../../domain/model/domain_types";
+
+export struct CliRunner {
+  __aura_type: String,
+  walletUseCase: WalletUseCase,
+  txUseCase: TransactionUseCase,
+  ledgerUseCase: LedgerUseCase,
+  metrics: PrometheusMetricsAdapter,
+  audit: SecurityAuditAdapter
+};
+
+export fn NewCliRunner(
+  wUc: WalletUseCase,
+  tUc: TransactionUseCase,
+  lUc: LedgerUseCase,
+  m: PrometheusMetricsAdapter,
+  a: SecurityAuditAdapter
+): CliRunner => {
+  return {
+    __aura_type: "CliRunner",
+    walletUseCase: wUc,
+    txUseCase: tUc,
+    ledgerUseCase: lUc,
+    metrics: m,
+    audit: a
+  };
+};
+
+fn (runner: CliRunner) RunLiveDemo(): Unit => {
+  let nowMs = 1700000000000;
+
+  println("--------------------------------------------------------------------------------");
+  println("  🚀 [DEMO-CLI] INICIANDO FLUJO DE TRABAJO AUTOMATIZADO EN ARQUITECTURA ONION");
+  println("--------------------------------------------------------------------------------");
+
+  // PASO 1: Creación de Cuentas Multidivisa
+  println("\n[PASO 1] Creando Billeteras / Cuentas Iniciales:");
+
+  let dto1: CreateAccountDTO = {
+    ownerName: "Alice Walker",
+    ownerEmail: "alice.walker@example.com",
+    currency: CURRENCY_USD(),
+    initialBalance: 5000.0,
+    dailyLimit: 20000.0
+  };
+  let acc1Res = runner.walletUseCase.CreateAccount(dto1, nowMs);
+  match acc1Res {
+    Err(e) => println(`  ✕ Error al crear cuenta 1: ${e}`),
+    Ok(acc1) => {
+      println(`  ✓ Cuenta Creada: ${acc1.ownerName} | ID: ${acc1.id} | N°: ${acc1.accountNumber} | Saldo: $${acc1.balance} ${acc1.currency}`);
+
+      let dto2: CreateAccountDTO = {
+        ownerName: "Bob Martin",
+        ownerEmail: "bob.martin@example.com",
+        currency: CURRENCY_EUR(),
+        initialBalance: 2500.0,
+        dailyLimit: 15000.0
+      };
+      let acc2Res = runner.walletUseCase.CreateAccount(dto2, nowMs);
+      match acc2Res {
+        Err(e2) => println(`  ✕ Error al crear cuenta 2: ${e2}`),
+        Ok(acc2) => {
+          println(`  ✓ Cuenta Creada: ${acc2.ownerName} | ID: ${acc2.id} | N°: ${acc2.accountNumber} | Saldo: €${acc2.balance} ${acc2.currency}`);
+
+          let dto3: CreateAccountDTO = {
+            ownerName: "Carlos Silva",
+            ownerEmail: "carlos.silva@example.com",
+            currency: CURRENCY_CLP(),
+            initialBalance: 1500000.0,
+            dailyLimit: 10000000.0
+          };
+          let acc3Res = runner.walletUseCase.CreateAccount(dto3, nowMs);
+          match acc3Res {
+            Err(e3) => println(`  ✕ Error al crear cuenta 3: ${e3}`),
+            Ok(acc3) => println(`  ✓ Cuenta Creada: ${acc3.ownerName} | ID: ${acc3.id} | N°: ${acc3.accountNumber} | Saldo: $${acc3.balance} ${acc3.currency}`)
+          };
+
+          // PASO 2: Depósito de Fondos
+          println("\n[PASO 2] Procesando Depósito Bancario:");
+          let depDto: DepositDTO = {
+            accountId: acc1.id,
+            amount: 1500.0,
+            description: "Depósito de nómina salarial"
+          };
+          let depRes = runner.txUseCase.ProcessDeposit(depDto, nowMs);
+          match depRes {
+            Ok(tx) => println(`  ✓ Depósito Exitoso: ID ${tx.id} | +${tx.amount} ${tx.currency} | Ref: ${tx.referenceCode}`),
+            Err(eDep) => println(`  ✕ Error en depósito: ${eDep}`)
+          };
+
+          // PASO 3: Transferencia Multidivisa (Alice USD -> Bob EUR)
+          println("\n[PASO 3] Ejecutando Transferencia Multidivisa (USD -> EUR) con Motor FX:");
+          let xferDto: TransferDTO = {
+            sourceAccountId: acc1.id,
+            destinationAccountNumber: acc2.accountNumber,
+            amount: 1000.0,
+            description: "Pago por consultoría de arquitectura de software"
+          };
+          let xferRes = runner.txUseCase.ProcessTransfer(xferDto, nowMs);
+          match xferRes {
+            Ok(tx) => {
+              println(`  ✓ Transferencia Exitosa:`);
+              println(`      • ID Transacción:  ${tx.id}`);
+              println(`      • Monto Origen:    ${tx.amount} ${tx.currency}`);
+              println(`      • Tasa FX:         ${tx.exchangeRate}`);
+              println(`      • Monto Destino:   ${tx.targetAmount} ${tx.targetCurrency}`);
+              println(`      • Comisión FX:     ${tx.fee} ${tx.currency}`);
+              println(`      • Risk Score:      ${tx.riskScore}`);
+            },
+            Err(eXfer) => println(`  ✕ Error en transferencia: ${eXfer}`)
+          };
+
+          // PASO 4: Prueba del Motor Antifraude (Rechazo por Riesgo Extremo)
+          println("\n[PASO 4] Evaluando Motor Antifraude (Simulación de Transacción Sospechosa):");
+          let fraudDto: TransferDTO = {
+            sourceAccountId: acc1.id,
+            destinationAccountNumber: acc2.accountNumber,
+            amount: 75000.0,
+            description: "Intento de transferencia de volumen anómalo"
+          };
+          let fraudRes = runner.txUseCase.ProcessTransfer(fraudDto, nowMs);
+          match fraudRes {
+            Ok(_) => println(`  ⚠️ Inesperado: La transacción fraudulenta fue aceptada`),
+            Err(eFraud) => println(`  🛡️ Correcto: Motor Antifraude Bloqueó la Operación -> ${eFraud}`)
+          };
+
+          // PASO 5: Reconciliación Contable del Libro Mayor (Ledger)
+          println("\n[PASO 5] Verificación Contable de Partida Doble en Libro Mayor:");
+          let recRes1 = runner.ledgerUseCase.ReconcileAccount(acc1.id, nowMs);
+          match recRes1 {
+            Ok(rec) => {
+              println(`  ✓ Reconciliación Cuenta ${acc1.ownerName} (${acc1.currency}):`);
+              println(`      • Total Asientos: ${rec.totalEntries} | Débitos: ${rec.totalDebits} | Créditos: ${rec.totalCredits}`);
+              println(`      • Saldo Neto:     ${rec.netTurnover} | Libro Cuadrado: ${rec.isBalanced}`);
+            },
+            Err(eRec) => println(`  ✕ Error en reconciliación 1: ${eRec}`)
+          };
+
+          let recRes2 = runner.ledgerUseCase.ReconcileAccount(acc2.id, nowMs);
+          match recRes2 {
+            Ok(rec2) => {
+              println(`  ✓ Reconciliación Cuenta ${acc2.ownerName} (${acc2.currency}):`);
+              println(`      • Total Asientos: ${rec2.totalEntries} | Débitos: ${rec2.totalDebits} | Créditos: ${rec2.totalCredits}`);
+              println(`      • Saldo Neto:     ${rec2.netTurnover} | Libro Cuadrado: ${rec2.isBalanced}`);
+            },
+            Err(eRec2) => println(`  ✕ Error en reconciliación 2: ${eRec2}`)
+          };
+
+          // PASO 6: Métricas y Telemetría Final
+          println("\n[PASO 6] Telemetría Prometheus Registrada:");
+          let metricsSummary = runner.metrics.GetMetricsSummary();
+          println(`  📈 Cuentas Creadas:       ${metricsSummary.accountsCreated}`);
+          println(`  📈 Transferencias:        ${metricsSummary.transfersCount}`);
+          println(`  📈 Depósitos:             ${metricsSummary.depositsCount}`);
+          println(`  📈 Retiros:               ${metricsSummary.withdrawalsCount}`);
+          println(`  📈 Alertas de Fraude:     ${metricsSummary.fraudRejectionsCount}`);
+          println(`  📊 Volumen Total:         $${metricsSummary.totalVolumeProcessed}`);
+          println(`  🛡️ Total Logs Auditoría:  ${runner.audit.Count()}`);
+          println("--------------------------------------------------------------------------------\n");
+        }
+      };
+    }
+  };
+}

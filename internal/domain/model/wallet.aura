@@ -1,0 +1,13 @@
+export struct Wallet {
+  id: String,
+  owner: String,
+  balance: Float
+};
+
+export fn NewWallet(id: String, owner: String, initialBalance: Float): Wallet => {
+  return {
+    id: id,
+    owner: owner,
+    balance: initialBalance
+  };
+};

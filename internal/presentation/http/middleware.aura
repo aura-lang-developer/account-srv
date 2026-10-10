@@ -1,0 +1,39 @@
+// ==============================================================================
+// Presentation Layer: HTTP Middlewares (CORS, Logging & Request Buffering)
+// ==============================================================================
+
+import { Request, Response } from "./http_types";
+
+export fn RegisterMiddleware(mux: Any): Unit => {
+  mux.use(fn(req: Request, res: Response, next: Any) => {
+    // 1. Cabeceras CORS y de Seguridad
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Correlation-ID");
+    res.setHeader("X-Architecture", "Onion-Architecture (Jeffrey Palermo Model)");
+    res.setHeader("X-Programming-Style", "Golang-Idiomatic-Model");
+    res.setHeader("X-Powered-By", "Aura Lang Native Engine (aurac)");
+    res.setHeader("Server", "aura-onion/1.0.0");
+
+    // 2. Manejo de Preflight OPTIONS
+    if (req.method == "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return();
+    }
+
+    // 3. Captura y acumulación de cuerpo (Body Buffering)
+    let mut buffer = "";
+    req.on("data", fn(chunk: Any) => {
+      buffer = buffer + chunk;
+    });
+
+    req.on("end", fn() => {
+      req.rawBody = buffer;
+      let method = req.method;
+      let url = req.url;
+      println(`  🌐 [HTTP] ${method} ${url}`);
+      next();
+    });
+  });
+};

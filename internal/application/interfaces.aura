@@ -1,0 +1,61 @@
+// ==============================================================================
+// Application Layer: Ports & Interfaces (Estilo Idiomático Golang Duck Typing)
+// ==============================================================================
+// "Acepta interfaces, retorna structs" - Principio de Inversión de Dependencias
+// ==============================================================================
+
+import { Account } from "../domain/model/account";
+import { Transaction } from "../domain/model/transaction";
+import { LedgerEntry } from "../domain/model/ledger";
+import { DomainEvent } from "../domain/events";
+
+// 1. Puerto de Persistencia: Repositorio de Cuentas / Wallets
+export interface AccountRepository {
+  Save(account: Account): Result<Unit, String>;
+  Update(account: Account): Result<Unit, String>;
+  FindById(id: String): Result<Account, String>;
+  FindByAccountNumber(accNum: String): Result<Account, String>;
+  FindByEmail(email: String): Result<Account, String>;
+  ListAll(limit: Int, offset: Int): Result<[]Account, String>;
+  Count(): Int;
+};
+
+// 2. Puerto de Persistencia: Repositorio de Transacciones
+export interface TransactionRepository {
+  Save(tx: Transaction): Result<Unit, String>;
+  FindById(id: String): Result<Transaction, String>;
+  FindByAccountId(accId: String, limit: Int): Result<[]Transaction, String>;
+  ListRecent(limit: Int): Result<[]Transaction, String>;
+  Count(): Int;
+};
+
+// 3. Puerto de Persistencia: Repositorio de Libro Mayor (Ledger)
+export interface LedgerRepository {
+  SaveEntry(entry: LedgerEntry): Result<Unit, String>;
+  FindByAccountId(accId: String): Result<[]LedgerEntry, String>;
+  FindByTransactionId(txId: String): Result<[]LedgerEntry, String>;
+  ListAll(): Result<[]LedgerEntry, String>;
+  Count(): Int;
+};
+
+// 4. Puerto de Notificación Externa
+export interface NotificationService {
+  SendTransferNotification(email: String, txId: String, amount: Float, currency: String, desc: String): Result<Unit, String>;
+  SendSecurityAlert(email: String, alertType: String, message: String): Result<Unit, String>;
+};
+
+// 5. Puerto de Publicación de Eventos de Dominio
+export interface EventPublisher {
+  Publish(event: DomainEvent): Result<Unit, String>;
+};
+
+// 6. Puerto de Telemetría y Métricas (Prometheus / CloudWatch)
+export interface MetricsCollector {
+  IncrementCounter(metricName: String, label: String): Unit;
+  RecordAmount(metricName: String, amount: Float): Unit;
+};
+
+// 7. Puerto de Auditoría y Cumplimiento Normativo (Compliance Log)
+export interface AuditLogger {
+  LogAudit(action: String, entityId: String, actor: String, detail: String, nowMs: Int): Unit;
+};

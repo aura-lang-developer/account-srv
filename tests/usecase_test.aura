@@ -1,0 +1,228 @@
+// ==============================================================================
+// Unit Tests: Application Layer Use Cases (Pure Dependency Injection)
+// ==============================================================================
+
+import { NewInMemoryAccountRepository } from "../internal/infrastructure/persistence/inmemory_account_repo";
+import { NewInMemoryTransactionRepository } from "../internal/infrastructure/persistence/inmemory_transaction_repo";
+import { NewInMemoryLedgerRepository } from "../internal/infrastructure/persistence/inmemory_ledger_repo";
+import { NewEmailNotifier } from "../internal/infrastructure/external/email_notifier";
+import { NewAsyncEventBus } from "../internal/infrastructure/messaging/async_event_bus";
+import { NewPrometheusMetricsAdapter } from "../internal/infrastructure/external/prometheus_metrics";
+import { NewSecurityAuditAdapter } from "../internal/infrastructure/external/audit_logger";
+
+import { NewCurrencyExchangeService } from "../internal/domain/service/currency_exchange";
+import { NewFraudDetectorService } from "../internal/domain/service/fraud_detector";
+import { NewLedgerCalculatorService } from "../internal/domain/service/ledger_calculator";
+
+import { NewWalletUseCase } from "../internal/application/services/wallet_usecase";
+import { NewTransactionUseCase } from "../internal/application/services/transaction_usecase";
+import { NewLedgerUseCase } from "../internal/application/services/ledger_usecase";
+
+import {
+  CreateAccountDTO,
+  DepositDTO,
+  WithdrawDTO,
+  TransferDTO
+} from "../internal/application/dto/wallet_dto";
+import {
+  CURRENCY_USD,
+  CURRENCY_EUR,
+  ACCOUNT_STATUS_ACTIVE,
+  ACCOUNT_STATUS_FROZEN,
+  TX_TYPE_DEPOSIT,
+  TX_TYPE_TRANSFER
+} from "../internal/domain/model/domain_types";
+
+export fn main(): Unit => {
+  let nowMs = 1700000000000;
+  let mut passed = 0;
+  let mut failed = 0;
+
+  println("================================================================================");
+  println("  🧪 EJECUTANDO PRUEBAS UNITARIAS: CASOS DE USO (CAPA DE APLICACIÓN)");
+  println("================================================================================");
+
+  // Setup Fixtures con Pure Dependency Injection
+  let accountRepo = NewInMemoryAccountRepository();
+  let txRepo = NewInMemoryTransactionRepository();
+  let ledgerRepo = NewInMemoryLedgerRepository();
+  let emailNotifier = NewEmailNotifier("mail.test.io");
+  let eventBus = NewAsyncEventBus();
+  let metrics = NewPrometheusMetricsAdapter();
+  let audit = NewSecurityAuditAdapter();
+
+  let exSvc = NewCurrencyExchangeService();
+  let fdSvc = NewFraudDetectorService(0.85);
+  let lcSvc = NewLedgerCalculatorService();
+
+  let walletUc = NewWalletUseCase(accountRepo, eventBus, metrics, audit);
+  let txUc = NewTransactionUseCase(accountRepo, txRepo, ledgerRepo, exSvc, fdSvc, lcSvc, emailNotifier, eventBus, metrics, audit);
+  let ledgerUc = NewLedgerUseCase(accountRepo, ledgerRepo, lcSvc, audit);
+
+  // Test 1: Crear Cuenta vía WalletUseCase
+  println("\n[TEST 1] WalletUseCase.CreateAccount:");
+  let dto1: CreateAccountDTO = {
+    ownerName: "Ada Lovelace",
+    ownerEmail: "ada@computing.org",
+    currency: CURRENCY_USD(),
+    initialBalance: 2000.0,
+    dailyLimit: 10000.0
+  };
+  let acc1Res = walletUc.CreateAccount(dto1, nowMs);
+  let mut acc1Id = "";
+  let mut acc1Num = "";
+  match acc1Res {
+    Ok(acc) => {
+      acc1Id = acc.id;
+      acc1Num = acc.accountNumber;
+      if (acc.balance == 2000.0 && eventBus.GetEventCount() == 1 && audit.Count() == 1) {
+        println(`  ✓ PASS: Cuenta creada con ID '${acc.id}' y evento publicado`);
+        passed = passed + 1;
+      } else {
+        println("  ✕ FAIL: Inconsistencia en creación de cuenta o eventos");
+        failed = failed + 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: ${e}`);
+      failed = failed + 1;
+    }
+  };
+
+  // Test 2: Crear Cuenta Destino (EUR)
+  println("\n[TEST 2] Creación de Segunda Cuenta para Transferencias:");
+  let dto2: CreateAccountDTO = {
+    ownerName: "Alan Turing",
+    ownerEmail: "alan@enigma.org",
+    currency: CURRENCY_EUR(),
+    initialBalance: 1000.0,
+    dailyLimit: 10000.0
+  };
+  let acc2Res = walletUc.CreateAccount(dto2, nowMs);
+  let mut acc2Num = "";
+  match acc2Res {
+    Ok(acc) => {
+      acc2Num = acc.accountNumber;
+      println(`  ✓ PASS: Cuenta 2 creada con ID '${acc.id}'`);
+      passed = passed + 1;
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: ${e}`);
+      failed = failed + 1;
+    }
+  };
+
+  // Test 3: TransactionUseCase.ProcessDeposit
+  println("\n[TEST 3] TransactionUseCase.ProcessDeposit:");
+  let depDto: DepositDTO = {
+    accountId: acc1Id,
+    amount: 500.0,
+    description: "Depósito de prueba"
+  };
+  let depRes = txUc.ProcessDeposit(depDto, nowMs);
+  match depRes {
+    Ok(tx) => {
+      let updatedAccRes = walletUc.GetAccountById(acc1Id);
+      match updatedAccRes {
+        Ok(uAcc) => {
+          if (uAcc.balance == 2500.0 && tx.transactionType == TX_TYPE_DEPOSIT()) {
+            println(`  ✓ PASS: Saldo actualizado a $${uAcc.balance} y TX registrada (${tx.id})`);
+            passed = passed + 1;
+          } else {
+            println("  ✕ FAIL: Saldo o tipo de transacción incorrecto");
+            failed = failed + 1;
+          }
+        },
+        Err(e) => {
+          println(`  ✕ FAIL: ${e}`);
+          failed = failed + 1;
+        }
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: ${e}`);
+      failed = failed + 1;
+    }
+  };
+
+  // Test 4: TransactionUseCase.ProcessTransfer (Multidivisa USD -> EUR con FX y Ledger Doble)
+  println("\n[TEST 4] TransactionUseCase.ProcessTransfer (USD -> EUR):");
+  let xferDto: TransferDTO = {
+    sourceAccountId: acc1Id,
+    destinationAccountNumber: acc2Num,
+    amount: 1000.0,
+    description: "Pago de servicios"
+  };
+  let xferRes = txUc.ProcessTransfer(xferDto, nowMs);
+  match xferRes {
+    Ok(tx) => {
+      if (tx.targetCurrency == "EUR" && tx.targetAmount == 920.0 && tx.fee == 2.5) {
+        println(`  ✓ PASS: Transferencia ejecutada. Origen: 1000 USD -> Destino: ${tx.targetAmount} EUR (Comisión: ${tx.fee})`);
+        passed = passed + 1;
+      } else {
+        println(`  ✕ FAIL: Valores de transferencia inesperados: target=${tx.targetAmount}, fee=${tx.fee}`);
+        failed = failed + 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: ${e}`);
+      failed = failed + 1;
+    }
+  };
+
+  // Test 5: LedgerUseCase.ReconcileAccount
+  println("\n[TEST 5] LedgerUseCase.ReconcileAccount:");
+  let recRes = ledgerUc.ReconcileAccount(acc1Id, nowMs);
+  match recRes {
+    Ok(rec) => {
+      if (rec.totalEntries > 0 && rec.totalDebits > 0.0 && rec.totalCredits > 0.0) {
+        println(`  ✓ PASS: Asientos reconciliados (${rec.totalEntries} entradas, Débitos: ${rec.totalDebits}, Créditos: ${rec.totalCredits})`);
+        passed = passed + 1;
+      } else {
+        println("  ✕ FAIL: Reconciliación vacía o incorrecta");
+        failed = failed + 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: ${e}`);
+      failed = failed + 1;
+    }
+  };
+
+  // Test 6: WalletUseCase.FreezeAccount & UnfreezeAccount
+  println("\n[TEST 6] WalletUseCase Freeze y Unfreeze:");
+  let freezeRes = walletUc.FreezeAccount(acc1Id, "Mantenimiento preventivo", nowMs);
+  match freezeRes {
+    Ok(frozenAcc) => {
+      if (frozenAcc.status == ACCOUNT_STATUS_FROZEN()) {
+        let unfreezeRes = walletUc.UnfreezeAccount(acc1Id, nowMs);
+        match unfreezeRes {
+          Ok(activeAcc) => {
+            if (activeAcc.status == ACCOUNT_STATUS_ACTIVE()) {
+              println("  ✓ PASS: Ciclo Freeze -> Unfreeze verificado exitosamente");
+              passed = passed + 1;
+            } else {
+              println("  ✕ FAIL: Estado posterior a unfreeze incorrecto");
+              failed = failed + 1;
+            }
+          },
+          Err(e) => {
+            println(`  ✕ FAIL: ${e}`);
+            failed = failed + 1;
+          }
+        }
+      } else {
+        println("  ✕ FAIL: Estado congelado incorrecto");
+        failed = failed + 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: ${e}`);
+      failed = failed + 1;
+    }
+  };
+
+  println("--------------------------------------------------------------------------------");
+  println(`  📊 RESULTADOS: ${passed} PASSED | ${failed} FAILED`);
+  println("================================================================================");
+};

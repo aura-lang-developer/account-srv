@@ -1,0 +1,123 @@
+// ==============================================================================
+// Microservicio de Billetera y Pagos Digitales (Onion Architecture in Aura Lang)
+// ==============================================================================
+// Composition Root - Punto de Entrada Principal (Pure Dependency Injection)
+// Estilo de Programación Idiomático Golang: "Acepta interfaces, retorna structs"
+// ==============================================================================
+
+import { LoadConfig } from "../../internal/infrastructure/config/config";
+
+// 1. Capa de Dominio: Servicios de Dominio
+import { NewCurrencyExchangeService } from "../../internal/domain/service/currency_exchange";
+import { NewFraudDetectorService } from "../../internal/domain/service/fraud_detector";
+import { NewLedgerCalculatorService } from "../../internal/domain/service/ledger_calculator";
+
+// 2. Capa de Infraestructura: Adaptadores de Persistencia, Mensajería y Telemetría
+import { NewInMemoryAccountRepository } from "../../internal/infrastructure/persistence/inmemory_account_repo";
+import { NewInMemoryTransactionRepository } from "../../internal/infrastructure/persistence/inmemory_transaction_repo";
+import { NewInMemoryLedgerRepository } from "../../internal/infrastructure/persistence/inmemory_ledger_repo";
+import { NewEmailNotifier } from "../../internal/infrastructure/external/email_notifier";
+import { NewAsyncEventBus } from "../../internal/infrastructure/messaging/async_event_bus";
+import { NewPrometheusMetricsAdapter } from "../../internal/infrastructure/external/prometheus_metrics";
+import { NewSecurityAuditAdapter } from "../../internal/infrastructure/external/audit_logger";
+
+// 3. Capa de Aplicación: Casos de Uso (Orquestadores de Negocio)
+import { NewWalletUseCase } from "../../internal/application/services/wallet_usecase";
+import { NewTransactionUseCase } from "../../internal/application/services/transaction_usecase";
+import { NewLedgerUseCase } from "../../internal/application/services/ledger_usecase";
+
+// 4. Capa de Presentación: Adaptadores HTTP y CLI
+import { NewWalletHttpHandler } from "../../internal/presentation/http/handler";
+import { RegisterMiddleware } from "../../internal/presentation/http/middleware";
+import { RegisterRoutes } from "../../internal/presentation/http/router";
+import { NewCliRunner } from "../../internal/presentation/cli/cli_runner";
+
+export fn main(): Unit => {
+  println("================================================================================");
+  println("  🧅 MICROSERVICIO BASADO EN ARQUITECTURA ONION (AURA LANG)");
+  println("================================================================================");
+  println("  • Arquitectura:        Onion Architecture (Jeffrey Palermo, Concentric Rings)");
+  println("  • Estilo de Código:    Golang Idiomatic Model (Pure DI, Receiver fn, Structs)");
+  println("  • Lenguaje & Runtime:  Aura Language Native Engine (aurac)");
+  println("  • Dominio:             Billetera Digital, Transacciones FX & Libro Mayor (Ledger)");
+  println("================================================================================");
+
+  // 1. Cargar Configuración de Infraestructura
+  let config = LoadConfig();
+  println(`\n[BOOTSTRAP] 1. Configuración cargada -> Ambiente: '${config.environment}', Servicio: '${config.serviceName}' v${config.version}`);
+
+  // 2. Instanciar Servicios de Dominio (Núcleo Puro)
+  println("[BOOTSTRAP] 2. Inicializando Capa de Servicios de Dominio (FX, Fraud, Ledger)...");
+  let exchangeService = NewCurrencyExchangeService();
+  let fraudDetectorService = NewFraudDetectorService(config.riskThreshold);
+  let ledgerCalculatorService = NewLedgerCalculatorService();
+
+  // 3. Instanciar Adaptadores de Infraestructura (Outbound Rings)
+  println("[BOOTSTRAP] 3. Instanciando Adaptadores de Infraestructura (Repo, EventBus, Metrics)...");
+  let accountRepo = NewInMemoryAccountRepository();
+  let txRepo = NewInMemoryTransactionRepository();
+  let ledgerRepo = NewInMemoryLedgerRepository();
+  let emailNotifier = NewEmailNotifier("mail.aura-pay.internal");
+  let eventBus = NewAsyncEventBus();
+  let metricsAdapter = NewPrometheusMetricsAdapter();
+  let auditAdapter = NewSecurityAuditAdapter();
+
+  // 4. Instanciar Casos de Uso de Aplicación (Inyección Pura de Interfaces)
+  println("[BOOTSTRAP] 4. Ensamblando Casos de Uso en Capa de Aplicación (Pure DI)...");
+  let walletUseCase = NewWalletUseCase(accountRepo, eventBus, metricsAdapter, auditAdapter);
+  let txUseCase = NewTransactionUseCase(
+    accountRepo,
+    txRepo,
+    ledgerRepo,
+    exchangeService,
+    fraudDetectorService,
+    ledgerCalculatorService,
+    emailNotifier,
+    eventBus,
+    metricsAdapter,
+    auditAdapter
+  );
+  let ledgerUseCase = NewLedgerUseCase(accountRepo, ledgerRepo, ledgerCalculatorService, auditAdapter);
+
+  // 5. Instanciar Adaptadores de Presentación (Inbound Handlers & CLI)
+  println("[BOOTSTRAP] 5. Configurando Adaptadores de Presentación (HTTP Handlers & CLI Runner)...");
+  let httpHandler = NewWalletHttpHandler(walletUseCase, txUseCase, ledgerUseCase, metricsAdapter, auditAdapter);
+  let cliRunner = NewCliRunner(walletUseCase, txUseCase, ledgerUseCase, metricsAdapter, auditAdapter);
+
+  // 6. Ejecución del Flujo de Demostración Inicial en CLI
+  cliRunner.RunLiveDemo();
+
+  // 7. Configuración del Servidor HTTP y Registro de Middleware y Rutas REST
+  let port = config.serverPort;
+  let mux = http.newServeMux();
+
+  // Middleware global (CORS, Logging, Body Buffering)
+  RegisterMiddleware(mux);
+
+  // Rutas REST
+  RegisterRoutes(mux, httpHandler);
+
+  println("--------------------------------------------------------------------------------");
+  println("  🌐 SERVIDOR HTTP REST INICIADO EXITOSAMENTE");
+  println(`  • URL Base:                     http://localhost:${port}`);
+  println(`  • Health Check:                 http://localhost:${port}/health`);
+  println(`  • Métricas Prometheus:          http://localhost:${port}/metrics`);
+  println(`  • Logs de Auditoría:            http://localhost:${port}/audit`);
+  println(`  • Listar Cuentas (GET):         http://localhost:${port}/api/v1/accounts`);
+  println(`  • Crear Cuenta (POST):          http://localhost:${port}/api/v1/accounts`);
+  println(`  • Depósito de Fondos (POST):    http://localhost:${port}/api/v1/transactions/deposit`);
+  println(`  • Retiro de Fondos (POST):      http://localhost:${port}/api/v1/transactions/withdraw`);
+  println(`  • Transferencia FX (POST):      http://localhost:${port}/api/v1/transactions/transfer`);
+  println(`  • Listar Transacciones (GET):   http://localhost:${port}/api/v1/transactions`);
+  println(`  • Libro Mayor / Ledger (GET):   http://localhost:${port}/api/v1/ledger`);
+  println("--------------------------------------------------------------------------------");
+  println("  💡 Ejemplos de llamadas con cURL:");
+  println(`     curl -s http://localhost:${port}/health | jq`);
+  println(`     curl -s http://localhost:${port}/metrics | jq`);
+  println(`     curl -s http://localhost:${port}/api/v1/accounts | jq`);
+  println(`     curl -s -X POST http://localhost:${port}/api/v1/accounts -H "Content-Type: application/json" -d '{"ownerName":"Margaret Hamilton","ownerEmail":"margaret@mit.edu","currency":"USD","initialBalance":8500.0}' | jq`);
+  println("================================================================================");
+  println("  [Microservicio ejecutándose y listo para recibir peticiones]\n");
+
+  let _ = mux.listenAndServe(":" + port);
+};

@@ -1,0 +1,144 @@
+// ==============================================================================
+// Application Layer: Wallet / Account Use Case (Servicio de Aplicación)
+// ==============================================================================
+
+import { Account, NewAccount } from "../../domain/model/account";
+import { CreateAccountDTO } from "../dto/wallet_dto";
+import { AccountRepository, EventPublisher, MetricsCollector, AuditLogger } from "../interfaces";
+import { NewDomainEvent, EVENT_ACCOUNT_CREATED, EVENT_ACCOUNT_FROZEN, EVENT_ACCOUNT_UNFROZEN } from "../../domain/events";
+import { ErrAccountNotFound } from "../../domain/errors";
+
+export struct WalletUseCase {
+  __aura_type: String,
+  repo: AccountRepository,
+  eventPublisher: EventPublisher,
+  metrics: MetricsCollector,
+  audit: AuditLogger
+};
+
+export fn NewWalletUseCase(
+  r: AccountRepository,
+  ep: EventPublisher,
+  m: MetricsCollector,
+  a: AuditLogger
+): WalletUseCase => {
+  return {
+    __aura_type: "WalletUseCase",
+    repo: r,
+    eventPublisher: ep,
+    metrics: m,
+    audit: a
+  };
+};
+
+fn (uc: WalletUseCase) CreateAccount(dto: CreateAccountDTO, nowMs: Int): Result<Account, String> => {
+  // Generar ID y número de cuenta
+  let count = uc.repo.Count() + 1;
+  let accId = `acc-${count + 1000}`;
+  let accNum = `CTA-AURA-${dto.currency}-${count + 5000}`;
+
+  let newAccRes = NewAccount(
+    accId,
+    accNum,
+    dto.ownerName,
+    dto.ownerEmail,
+    dto.currency,
+    dto.initialBalance,
+    dto.dailyLimit,
+    nowMs
+  );
+
+  match newAccRes {
+    Err(e) => Err(e),
+    Ok(acc) => {
+      let saveRes = uc.repo.Save(acc);
+      match saveRes {
+        Err(e2) => Err(e2),
+        Ok(_) => {
+          // Publicar Evento de Dominio
+          let eventPayload = `{"accountId":"${acc.id}","accountNumber":"${acc.accountNumber}","ownerEmail":"${acc.ownerEmail}","currency":"${acc.currency}","balance":${acc.balance}}`;
+          let domainEvent = NewDomainEvent(`evt-${nowMs}`, EVENT_ACCOUNT_CREATED(), acc.id, eventPayload, nowMs);
+          let _ = uc.eventPublisher.Publish(domainEvent);
+
+          // Registrar métricas y auditoría
+          uc.metrics.IncrementCounter("accounts_created_total", acc.currency);
+          uc.audit.LogAudit("ACCOUNT_CREATED", acc.id, acc.ownerEmail, `Cuenta creada con saldo inicial ${acc.balance} ${acc.currency}`, nowMs);
+
+          Ok(acc)
+        }
+      }
+    }
+  }
+}
+
+fn (uc: WalletUseCase) GetAccountById(id: String): Result<Account, String> => {
+  uc.repo.FindById(id)
+}
+
+fn (uc: WalletUseCase) GetAccountByNumber(accNum: String): Result<Account, String> => {
+  uc.repo.FindByAccountNumber(accNum)
+}
+
+fn (uc: WalletUseCase) ListAccounts(limit: Int, offset: Int): Result<[]Account, String> => {
+  uc.repo.ListAll(limit, offset)
+}
+
+fn (uc: WalletUseCase) FreezeAccount(id: String, reason: String, nowMs: Int): Result<Account, String> => {
+  let accRes = uc.repo.FindById(id);
+  match accRes {
+    Err(e) => Err(e),
+    Ok(currentAcc) => {
+      let freezeRes = currentAcc.Freeze(reason, nowMs);
+      match freezeRes {
+        Err(e2) => Err(e2),
+        Ok(frozenAcc) => {
+          let updateRes = uc.repo.Update(frozenAcc);
+          match updateRes {
+            Err(e3) => Err(e3),
+            Ok(_) => {
+              let domainEvent = NewDomainEvent(`evt-${nowMs}`, EVENT_ACCOUNT_FROZEN(), frozenAcc.id, `{"reason":"${reason}"}`, nowMs);
+              let _ = uc.eventPublisher.Publish(domainEvent);
+
+              uc.metrics.IncrementCounter("accounts_frozen_total", frozenAcc.currency);
+              uc.audit.LogAudit("ACCOUNT_FROZEN", frozenAcc.id, "SYSTEM_ADMIN", `Cuenta congelada por: ${reason}`, nowMs);
+
+              Ok(frozenAcc)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn (uc: WalletUseCase) UnfreezeAccount(id: String, nowMs: Int): Result<Account, String> => {
+  let accRes = uc.repo.FindById(id);
+  match accRes {
+    Err(e) => Err(e),
+    Ok(currentAcc) => {
+      let unfreezeRes = currentAcc.Unfreeze(nowMs);
+      match unfreezeRes {
+        Err(e2) => Err(e2),
+        Ok(activeAcc) => {
+          let updateRes = uc.repo.Update(activeAcc);
+          match updateRes {
+            Err(e3) => Err(e3),
+            Ok(_) => {
+              let domainEvent = NewDomainEvent(`evt-${nowMs}`, EVENT_ACCOUNT_UNFROZEN(), activeAcc.id, "{}", nowMs);
+              let _ = uc.eventPublisher.Publish(domainEvent);
+
+              uc.metrics.IncrementCounter("accounts_unfrozen_total", activeAcc.currency);
+              uc.audit.LogAudit("ACCOUNT_UNFROZEN", activeAcc.id, "SYSTEM_ADMIN", "Cuenta reactivada", nowMs);
+
+              Ok(activeAcc)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn (uc: WalletUseCase) GetTotalCount(): Int => {
+  uc.repo.Count()
+}

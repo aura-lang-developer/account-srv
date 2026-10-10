@@ -1,0 +1,85 @@
+// ==============================================================================
+// Infrastructure Layer: In-Memory Transaction Repository (Thread-Safe Mutex)
+// ==============================================================================
+
+import { Transaction } from "../../domain/model/transaction";
+import { ErrTransactionNotFound } from "../../domain/errors";
+
+export struct InMemoryTransactionRepository {
+  __aura_type: String,
+  transactions: []Transaction,
+  mu: Mutex
+};
+
+export fn NewInMemoryTransactionRepository(): InMemoryTransactionRepository => {
+  let empty: []Transaction = [];
+  return {
+    __aura_type: "InMemoryTransactionRepository",
+    transactions: empty,
+    mu: Mutex.new()
+  };
+};
+
+fn (r: InMemoryTransactionRepository) Count(): Int => {
+  r.mu.lock();
+  defer r.mu.unlock();
+  len(r.transactions)
+}
+
+fn (r: InMemoryTransactionRepository) FindById(id: String): Result<Transaction, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  for tx in r.transactions {
+    if (tx.id == id) {
+      return Ok(tx);
+    }
+  }
+  Err(`${ErrTransactionNotFound()} (ID: ${id})`)
+}
+
+fn (r: InMemoryTransactionRepository) Save(tx: Transaction): Result<Unit, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  r.transactions = append(r.transactions, tx);
+  Ok(())
+}
+
+fn (r: InMemoryTransactionRepository) FindByAccountId(accId: String, limit: Int): Result<[]Transaction, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  let maxLimit = if (limit <= 0) { 50 } else { limit };
+  let mut matched: []Transaction = [];
+  let total = len(r.transactions);
+
+  // Iterar en orden inverso (más recientes primero)
+  let mut i = total - 1;
+  while i >= 0 && len(matched) < maxLimit {
+    let tx = r.transactions[i];
+    if (tx.sourceAccountId == accId || tx.destinationAccountId == accId) {
+      matched = append(matched, tx);
+    }
+    i = i - 1;
+  }
+
+  Ok(matched)
+}
+
+fn (r: InMemoryTransactionRepository) ListRecent(limit: Int): Result<[]Transaction, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  let maxLimit = if (limit <= 0) { 50 } else { limit };
+  let mut recent: []Transaction = [];
+  let total = len(r.transactions);
+
+  let mut i = total - 1;
+  while i >= 0 && len(recent) < maxLimit {
+    recent = append(recent, r.transactions[i]);
+    i = i - 1;
+  }
+
+  Ok(recent)
+}

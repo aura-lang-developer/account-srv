@@ -1,0 +1,6 @@
+// ==============================================================================
+// Presentation Layer: HTTP Transport Types (Single Source of Truth)
+// ==============================================================================
+
+export type Request = Any;
+export type Response = Any;

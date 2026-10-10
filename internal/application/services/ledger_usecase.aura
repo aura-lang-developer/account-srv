@@ -1,0 +1,69 @@
+// ==============================================================================
+// Application Layer: Ledger / Audit Reconciliation Use Case (Servicio de Aplicación)
+// ==============================================================================
+
+import { LedgerEntry } from "../../domain/model/ledger";
+import { ReconciliationSummary, LedgerCalculatorService } from "../../domain/service/ledger_calculator";
+import { AccountRepository, LedgerRepository, AuditLogger } from "../interfaces";
+import { ErrAccountNotFound } from "../../domain/errors";
+
+export struct LedgerUseCase {
+  __aura_type: String,
+  accountRepo: AccountRepository,
+  ledgerRepo: LedgerRepository,
+  ledgerCalc: LedgerCalculatorService,
+  audit: AuditLogger
+};
+
+export fn NewLedgerUseCase(
+  aRepo: AccountRepository,
+  lRepo: LedgerRepository,
+  lcSvc: LedgerCalculatorService,
+  audit: AuditLogger
+): LedgerUseCase => {
+  return {
+    __aura_type: "LedgerUseCase",
+    accountRepo: aRepo,
+    ledgerRepo: lRepo,
+    ledgerCalc: lcSvc,
+    audit: audit
+  };
+};
+
+fn (uc: LedgerUseCase) GetAccountLedger(accId: String): Result<[]LedgerEntry, String> => {
+  let accRes = uc.accountRepo.FindById(accId);
+  match accRes {
+    Err(e) => Err(e),
+    Ok(_) => uc.ledgerRepo.FindByAccountId(accId)
+  }
+}
+
+fn (uc: LedgerUseCase) GetTransactionLedger(txId: String): Result<[]LedgerEntry, String> => {
+  uc.ledgerRepo.FindByTransactionId(txId)
+}
+
+fn (uc: LedgerUseCase) ReconcileAccount(accId: String, nowMs: Int): Result<ReconciliationSummary, String> => {
+  let accRes = uc.accountRepo.FindById(accId);
+  match accRes {
+    Err(e) => Err(e),
+    Ok(acc) => {
+      let entriesRes = uc.ledgerRepo.FindByAccountId(acc.id);
+      match entriesRes {
+        Err(e2) => Err(e2),
+        Ok(entries) => {
+          let summary = uc.ledgerCalc.ReconcileEntries(entries);
+          uc.audit.LogAudit("ACCOUNT_RECONCILED", acc.id, "AUDIT_SERVICE", `Reconciliación completada: ${summary.totalEntries} asientos, Balanceado: ${summary.isBalanced}`, nowMs);
+          Ok(summary)
+        }
+      }
+    }
+  }
+}
+
+fn (uc: LedgerUseCase) ListAllEntries(): Result<[]LedgerEntry, String> => {
+  uc.ledgerRepo.ListAll()
+}
+
+fn (uc: LedgerUseCase) GetTotalCount(): Int => {
+  uc.ledgerRepo.Count()
+}

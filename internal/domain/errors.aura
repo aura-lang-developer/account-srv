@@ -1,0 +1,16 @@
+// ==============================================================================
+// Domain Layer: Domain Errors (Estilo Golang Idiomático)
+// ==============================================================================
+
+export fn ErrAccountNotFound(): String => "ERROR_ACCOUNT_NOT_FOUND: La cuenta especificada no existe";
+export fn ErrAccountAlreadyExists(): String => "ERROR_ACCOUNT_ALREADY_EXISTS: Ya existe una cuenta con el ID o email especificado";
+export fn ErrAccountFrozen(): String => "ERROR_ACCOUNT_FROZEN: La cuenta se encuentra congelada y no admite operaciones";
+export fn ErrAccountClosed(): String => "ERROR_ACCOUNT_CLOSED: La cuenta ha sido cerrada permanentemente";
+export fn ErrInsufficientFunds(): String => "ERROR_INSUFFICIENT_FUNDS: Saldo insuficiente para realizar la operación";
+export fn ErrInvalidAmount(): String => "ERROR_INVALID_AMOUNT: El monto debe ser estrictamente positivo mayor a cero";
+export fn ErrInvalidCurrency(): String => "ERROR_INVALID_CURRENCY: La moneda especificada no es compatible o no está soportada";
+export fn ErrSameAccountTransfer(): String => "ERROR_SAME_ACCOUNT_TRANSFER: La cuenta de origen y destino no pueden ser la misma";
+export fn ErrTransactionNotFound(): String => "ERROR_TRANSACTION_NOT_FOUND: La transacción solicitada no fue encontrada";
+export fn ErrFraudRiskRejected(): String => "ERROR_FRAUD_RISK_REJECTED: La operación fue rechazada por el motor de detección de fraude y riesgos";
+export fn ErrDailyLimitExceeded(): String => "ERROR_DAILY_LIMIT_EXCEEDED: Se ha superado el límite diario permitido para transferencias";
+export fn ErrLedgerMismatch(): String => "ERROR_LEDGER_MISMATCH: Inconsistencia detectada en el balance del libro contable";

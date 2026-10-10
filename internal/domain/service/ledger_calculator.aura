@@ -1,0 +1,62 @@
+// ==============================================================================
+// Domain Layer: Ledger Calculator & Reconciliation Domain Service
+// ==============================================================================
+
+import { LedgerEntry, NewLedgerEntry } from "../model/ledger";
+import { LEDGER_ENTRY_DEBIT, LEDGER_ENTRY_CREDIT } from "../model/domain_types";
+import { ErrLedgerMismatch } from "../errors";
+
+export struct ReconciliationSummary {
+  totalEntries: Int,
+  totalDebits: Float,
+  totalCredits: Float,
+  netTurnover: Float,
+  isBalanced: Bool
+};
+
+export struct LedgerCalculatorService {
+  __aura_type: String
+};
+
+export fn NewLedgerCalculatorService(): LedgerCalculatorService => {
+  return {
+    __aura_type: "LedgerCalculatorService"
+  };
+};
+
+fn (s: LedgerCalculatorService) ReconcileEntries(entries: []LedgerEntry): ReconciliationSummary => {
+  let mut debits: Float = 0.0;
+  let mut credits: Float = 0.0;
+
+  for e in entries {
+    if (e.entryType == LEDGER_ENTRY_DEBIT()) {
+      debits = debits + e.amount;
+    } else if (e.entryType == LEDGER_ENTRY_CREDIT()) {
+      credits = credits + e.amount;
+    }
+  }
+
+  let turnover = credits - debits;
+  let count = len(entries);
+  let balanced = (credits == debits) || (count == 0);
+
+  let summary: ReconciliationSummary = {
+    totalEntries: count,
+    totalDebits: debits,
+    totalCredits: credits,
+    netTurnover: turnover,
+    isBalanced: balanced
+  };
+
+  summary
+}
+
+fn (s: LedgerCalculatorService) VerifyTransferPair(debitEntry: LedgerEntry, creditEntry: LedgerEntry): Result<Unit, String> => {
+  if (debitEntry.entryType != LEDGER_ENTRY_DEBIT() || creditEntry.entryType != LEDGER_ENTRY_CREDIT()) {
+    return Err(`${ErrLedgerMismatch()}: El par de asientos debe contener un Débito y un Crédito`);
+  }
+  if (debitEntry.transactionId != creditEntry.transactionId) {
+    return Err(`${ErrLedgerMismatch()}: Los identificadores de transacción no coinciden`);
+  }
+  Ok(())
+}

@@ -1,0 +1,74 @@
+// ==============================================================================
+// Infrastructure Layer: Compliance & Security Audit Logger Adapter
+// ==============================================================================
+
+export struct AuditLogEntry {
+  id: String,
+  action: String,
+  entityId: String,
+  actor: String,
+  detail: String,
+  timestampMs: Int
+};
+
+export struct SecurityAuditAdapter {
+  __aura_type: String,
+  logs: []AuditLogEntry,
+  mu: Mutex
+};
+
+export fn NewSecurityAuditAdapter(): SecurityAuditAdapter => {
+  let empty: []AuditLogEntry = [];
+  return {
+    __aura_type: "SecurityAuditAdapter",
+    logs: empty,
+    mu: Mutex.new()
+  };
+};
+
+fn (a: SecurityAuditAdapter) LogAudit(
+  action: String,
+  entityId: String,
+  actor: String,
+  detail: String,
+  nowMs: Int
+): Unit => {
+  a.mu.lock();
+  defer a.mu.unlock();
+
+  let entryId = `aud-${len(a.logs) + 1}`;
+  let entry: AuditLogEntry = {
+    id: entryId,
+    action: action,
+    entityId: entityId,
+    actor: actor,
+    detail: detail,
+    timestampMs: nowMs
+  };
+
+  a.logs = append(a.logs, entry);
+  println(`      🛡️  [Audit] [${action}] Entity: ${entityId} | Actor: ${actor} | ${detail}`);
+}
+
+fn (a: SecurityAuditAdapter) GetRecentLogs(limit: Int): []AuditLogEntry => {
+  a.mu.lock();
+  defer a.mu.unlock();
+
+  let maxLimit = if (limit <= 0) { 20 } else { limit };
+  let mut recent: []AuditLogEntry = [];
+  let total = len(a.logs);
+
+  let mut i = total - 1;
+  while i >= 0 && len(recent) < maxLimit {
+    recent = append(recent, a.logs[i]);
+    i = i - 1;
+  }
+
+  recent
+}
+
+fn (a: SecurityAuditAdapter) Count(): Int => {
+  a.mu.lock();
+  defer a.mu.unlock();
+  len(a.logs)
+}

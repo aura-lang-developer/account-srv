@@ -1,0 +1,121 @@
+// ==============================================================================
+// Infrastructure Layer: In-Memory Account Repository (Thread-Safe Mutex)
+// ==============================================================================
+
+import { Account } from "../../domain/model/account";
+import { ErrAccountNotFound, ErrAccountAlreadyExists } from "../../domain/errors";
+
+export struct InMemoryAccountRepository {
+  __aura_type: String,
+  accounts: []Account,
+  mu: Mutex
+};
+
+export fn NewInMemoryAccountRepository(): InMemoryAccountRepository => {
+  let empty: []Account = [];
+  return {
+    __aura_type: "InMemoryAccountRepository",
+    accounts: empty,
+    mu: Mutex.new()
+  };
+};
+
+fn (r: InMemoryAccountRepository) Count(): Int => {
+  r.mu.lock();
+  defer r.mu.unlock();
+  len(r.accounts)
+}
+
+fn (r: InMemoryAccountRepository) FindById(id: String): Result<Account, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  for a in r.accounts {
+    if (a.id == id) {
+      return Ok(a);
+    }
+  }
+  Err(`${ErrAccountNotFound()} (ID: ${id})`)
+}
+
+fn (r: InMemoryAccountRepository) FindByAccountNumber(accNum: String): Result<Account, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  for a in r.accounts {
+    if (a.accountNumber == accNum) {
+      return Ok(a);
+    }
+  }
+  Err(`${ErrAccountNotFound()} (Número: ${accNum})`)
+}
+
+fn (r: InMemoryAccountRepository) FindByEmail(email: String): Result<Account, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  for a in r.accounts {
+    if (a.ownerEmail == email) {
+      return Ok(a);
+    }
+  }
+  Err(`${ErrAccountNotFound()} (Email: ${email})`)
+}
+
+fn (r: InMemoryAccountRepository) Save(account: Account): Result<Unit, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  for a in r.accounts {
+    if (a.id == account.id || a.accountNumber == account.accountNumber) {
+      return Err(ErrAccountAlreadyExists());
+    }
+  }
+
+  r.accounts = append(r.accounts, account);
+  Ok(())
+}
+
+fn (r: InMemoryAccountRepository) Update(account: Account): Result<Unit, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  let mut found = false;
+  let mut updatedList: []Account = [];
+
+  for a in r.accounts {
+    if (a.id == account.id) {
+      updatedList = append(updatedList, account);
+      found = true;
+    } else {
+      updatedList = append(updatedList, a);
+    }
+  }
+
+  if (!found) {
+    return Err(`${ErrAccountNotFound()} (ID: ${account.id})`);
+  }
+
+  r.accounts = updatedList;
+  Ok(())
+}
+
+fn (r: InMemoryAccountRepository) ListAll(limit: Int, offset: Int): Result<[]Account, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  let maxLimit = if (limit <= 0) { 100 } else { limit };
+  let mut result: []Account = [];
+  let total = len(r.accounts);
+
+  let mut i = offset;
+  let mut collected = 0;
+
+  while i < total && collected < maxLimit {
+    result = append(result, r.accounts[i]);
+    i = i + 1;
+    collected = collected + 1;
+  }
+
+  Ok(result)
+}

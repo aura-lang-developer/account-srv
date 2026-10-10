@@ -1,0 +1,78 @@
+// ==============================================================================
+// Domain Layer: Transaction Entity (Entidad de Transacción Financiera)
+// ==============================================================================
+
+import {
+  TX_TYPE_DEPOSIT,
+  TX_TYPE_WITHDRAWAL,
+  TX_TYPE_TRANSFER,
+  TX_TYPE_FEE,
+  TX_STATUS_COMPLETED,
+  TX_STATUS_PENDING,
+  TX_STATUS_REJECTED
+} from "./domain_types";
+
+import { ErrInvalidAmount } from "../errors";
+
+export struct Transaction {
+  id: String,
+  transactionType: String,
+  sourceAccountId: String,
+  destinationAccountId: String,
+  amount: Float,
+  currency: String,
+  exchangeRate: Float,
+  targetAmount: Float,
+  targetCurrency: String,
+  fee: Float,
+  status: String,
+  description: String,
+  referenceCode: String,
+  riskScore: Float,
+  createdAtMs: Int
+};
+
+export fn NewTransaction(
+  id: String,
+  txType: String,
+  srcAccId: String,
+  dstAccId: String,
+  amount: Float,
+  currency: String,
+  exchangeRate: Float,
+  targetAmount: Float,
+  targetCurrency: String,
+  fee: Float,
+  status: String,
+  description: String,
+  referenceCode: String,
+  riskScore: Float,
+  createdAtMs: Int
+): Result<Transaction, String> => {
+  if (id == "") {
+    return Err("El ID de la transacción es obligatorio");
+  }
+  if (amount <= 0.0) {
+    return Err(ErrInvalidAmount());
+  }
+
+  let tx: Transaction = {
+    id: id,
+    transactionType: txType,
+    sourceAccountId: srcAccId,
+    destinationAccountId: dstAccId,
+    amount: amount,
+    currency: currency,
+    exchangeRate: if (exchangeRate <= 0.0) { 1.0 } else { exchangeRate },
+    targetAmount: if (targetAmount <= 0.0) { amount } else { targetAmount },
+    targetCurrency: if (targetCurrency == "") { currency } else { targetCurrency },
+    fee: fee,
+    status: if (status == "") { TX_STATUS_COMPLETED() } else { status },
+    description: description,
+    referenceCode: referenceCode,
+    riskScore: riskScore,
+    createdAtMs: createdAtMs
+  };
+
+  return Ok(tx);
+};

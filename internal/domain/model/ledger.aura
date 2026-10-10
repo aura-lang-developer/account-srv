@@ -1,0 +1,57 @@
+// ==============================================================================
+// Domain Layer: Ledger Entry (Asiento Contable Inmutable de Partida Doble)
+// ==============================================================================
+
+import { LEDGER_ENTRY_DEBIT, LEDGER_ENTRY_CREDIT } from "./domain_types";
+import { ErrInvalidAmount } from "../errors";
+
+export struct LedgerEntry {
+  entryNumber: Int,
+  ledgerId: String,
+  transactionId: String,
+  accountId: String,
+  entryType: String,
+  amount: Float,
+  currency: String,
+  balanceAfter: Float,
+  narration: String,
+  timestampMs: Int
+};
+
+export fn NewLedgerEntry(
+  entryNum: Int,
+  ledgerId: String,
+  txId: String,
+  accId: String,
+  entryType: String,
+  amount: Float,
+  currency: String,
+  balanceAfter: Float,
+  narration: String,
+  nowMs: Int
+): Result<LedgerEntry, String> => {
+  if (ledgerId == "" || txId == "" || accId == "") {
+    return Err("Los identificadores de ledger, transacción y cuenta son obligatorios");
+  }
+  if (amount <= 0.0) {
+    return Err(ErrInvalidAmount());
+  }
+  if (entryType != LEDGER_ENTRY_DEBIT() && entryType != LEDGER_ENTRY_CREDIT()) {
+    return Err("Tipo de asiento inválido (Debe ser DEBIT o CREDIT)");
+  }
+
+  let entry: LedgerEntry = {
+    entryNumber: entryNum,
+    ledgerId: ledgerId,
+    transactionId: txId,
+    accountId: accId,
+    entryType: entryType,
+    amount: amount,
+    currency: currency,
+    balanceAfter: balanceAfter,
+    narration: narration,
+    timestampMs: nowMs
+  };
+
+  return Ok(entry);
+};

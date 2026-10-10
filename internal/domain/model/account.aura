@@ -1,0 +1,246 @@
+// ==============================================================================
+// Domain Layer: Account Aggregate Root (Modelo Puro de Dominio)
+// ==============================================================================
+
+import {
+  CURRENCY_USD,
+  CURRENCY_EUR,
+  CURRENCY_GBP,
+  CURRENCY_CLP,
+  CURRENCY_BRL,
+  ACCOUNT_STATUS_ACTIVE,
+  ACCOUNT_STATUS_FROZEN,
+  ACCOUNT_STATUS_CLOSED
+} from "./domain_types";
+
+import {
+  ErrAccountFrozen,
+  ErrAccountClosed,
+  ErrInsufficientFunds,
+  ErrInvalidAmount,
+  ErrInvalidCurrency,
+  ErrDailyLimitExceeded
+} from "../errors";
+
+export struct Account {
+  id: String,
+  accountNumber: String,
+  ownerName: String,
+  ownerEmail: String,
+  currency: String,
+  balance: Float,
+  heldBalance: Float,
+  status: String,
+  dailyTransferred: Float,
+  dailyLimit: Float,
+  createdAtMs: Int,
+  updatedAtMs: Int
+};
+
+// Validador de moneda soportada
+export fn IsValidCurrency(c: String): Bool => {
+  c == CURRENCY_USD() || c == CURRENCY_EUR() || c == CURRENCY_GBP() || c == CURRENCY_CLP() || c == CURRENCY_BRL()
+};
+
+// Constructor de Entidad de Dominio
+export fn NewAccount(
+  id: String,
+  accountNumber: String,
+  ownerName: String,
+  ownerEmail: String,
+  currency: String,
+  initialBalance: Float,
+  dailyLimit: Float,
+  nowMs: Int
+): Result<Account, String> => {
+  if (id == "" || accountNumber == "") {
+    return Err("El ID y número de cuenta son obligatorios");
+  }
+  if (ownerName == "" || ownerEmail == "") {
+    return Err("El nombre y correo del propietario son obligatorios");
+  }
+  if (!IsValidCurrency(currency)) {
+    return Err(ErrInvalidCurrency());
+  }
+  if (initialBalance < 0.0) {
+    return Err("El saldo inicial no puede ser negativo");
+  }
+
+  let limit = if (dailyLimit <= 0.0) { 10000.0 } else { dailyLimit };
+
+  let acc: Account = {
+    id: id,
+    accountNumber: accountNumber,
+    ownerName: ownerName,
+    ownerEmail: ownerEmail,
+    currency: currency,
+    balance: initialBalance,
+    heldBalance: 0.0,
+    status: ACCOUNT_STATUS_ACTIVE(),
+    dailyTransferred: 0.0,
+    dailyLimit: limit,
+    createdAtMs: nowMs,
+    updatedAtMs: nowMs
+  };
+
+  return Ok(acc);
+};
+
+// Métodos de Dominio e Invariantes
+fn (a: Account) AvailableBalance(): Float => {
+  let avail = a.balance - a.heldBalance;
+  if (avail < 0.0) { 0.0 } else { avail }
+}
+
+fn (a: Account) CanTransact(): Result<Unit, String> => {
+  if (a.status == ACCOUNT_STATUS_FROZEN()) {
+    return Err(ErrAccountFrozen());
+  }
+  if (a.status == ACCOUNT_STATUS_CLOSED()) {
+    return Err(ErrAccountClosed());
+  }
+  Ok(())
+}
+
+fn (a: Account) Deposit(amount: Float, nowMs: Int): Result<Account, String> => {
+  if (amount <= 0.0) {
+    return Err(ErrInvalidAmount());
+  }
+  if (a.status == ACCOUNT_STATUS_FROZEN()) {
+    return Err(ErrAccountFrozen());
+  }
+  if (a.status == ACCOUNT_STATUS_CLOSED()) {
+    return Err(ErrAccountClosed());
+  }
+
+  let newAcc: Account = {
+    id: a.id,
+    accountNumber: a.accountNumber,
+    ownerName: a.ownerName,
+    ownerEmail: a.ownerEmail,
+    currency: a.currency,
+    balance: a.balance + amount,
+    heldBalance: a.heldBalance,
+    status: a.status,
+    dailyTransferred: a.dailyTransferred,
+    dailyLimit: a.dailyLimit,
+    createdAtMs: a.createdAtMs,
+    updatedAtMs: nowMs
+  };
+
+  Ok(newAcc)
+}
+
+fn (a: Account) Withdraw(amount: Float, nowMs: Int): Result<Account, String> => {
+  if (amount <= 0.0) {
+    return Err(ErrInvalidAmount());
+  }
+  if (a.status == ACCOUNT_STATUS_FROZEN()) {
+    return Err(ErrAccountFrozen());
+  }
+  if (a.status == ACCOUNT_STATUS_CLOSED()) {
+    return Err(ErrAccountClosed());
+  }
+
+  let available = a.AvailableBalance();
+  if (amount > available) {
+    return Err(ErrInsufficientFunds());
+  }
+
+  let newAcc: Account = {
+    id: a.id,
+    accountNumber: a.accountNumber,
+    ownerName: a.ownerName,
+    ownerEmail: a.ownerEmail,
+    currency: a.currency,
+    balance: a.balance - amount,
+    heldBalance: a.heldBalance,
+    status: a.status,
+    dailyTransferred: a.dailyTransferred,
+    dailyLimit: a.dailyLimit,
+    createdAtMs: a.createdAtMs,
+    updatedAtMs: nowMs
+  };
+
+  Ok(newAcc)
+}
+
+fn (a: Account) CheckAndDebitTransfer(amount: Float, nowMs: Int): Result<Account, String> => {
+  if (amount <= 0.0) {
+    return Err(ErrInvalidAmount());
+  }
+  if (a.status == ACCOUNT_STATUS_FROZEN()) {
+    return Err(ErrAccountFrozen());
+  }
+  if (a.status == ACCOUNT_STATUS_CLOSED()) {
+    return Err(ErrAccountClosed());
+  }
+
+  if ((a.dailyTransferred + amount) > a.dailyLimit) {
+    return Err(ErrDailyLimitExceeded());
+  }
+
+  let available = a.AvailableBalance();
+  if (amount > available) {
+    return Err(ErrInsufficientFunds());
+  }
+
+  let newAcc: Account = {
+    id: a.id,
+    accountNumber: a.accountNumber,
+    ownerName: a.ownerName,
+    ownerEmail: a.ownerEmail,
+    currency: a.currency,
+    balance: a.balance - amount,
+    heldBalance: a.heldBalance,
+    status: a.status,
+    dailyTransferred: a.dailyTransferred + amount,
+    dailyLimit: a.dailyLimit,
+    createdAtMs: a.createdAtMs,
+    updatedAtMs: nowMs
+  };
+
+  Ok(newAcc)
+}
+
+fn (a: Account) Freeze(reason: String, nowMs: Int): Result<Account, String> => {
+  if (a.status == ACCOUNT_STATUS_CLOSED()) {
+    return Err(ErrAccountClosed());
+  }
+  let newAcc: Account = {
+    id: a.id,
+    accountNumber: a.accountNumber,
+    ownerName: a.ownerName,
+    ownerEmail: a.ownerEmail,
+    currency: a.currency,
+    balance: a.balance,
+    heldBalance: a.heldBalance,
+    status: ACCOUNT_STATUS_FROZEN(),
+    dailyTransferred: a.dailyTransferred,
+    dailyLimit: a.dailyLimit,
+    createdAtMs: a.createdAtMs,
+    updatedAtMs: nowMs
+  };
+  Ok(newAcc)
+}
+
+fn (a: Account) Unfreeze(nowMs: Int): Result<Account, String> => {
+  if (a.status == ACCOUNT_STATUS_CLOSED()) {
+    return Err(ErrAccountClosed());
+  }
+  let newAcc: Account = {
+    id: a.id,
+    accountNumber: a.accountNumber,
+    ownerName: a.ownerName,
+    ownerEmail: a.ownerEmail,
+    currency: a.currency,
+    balance: a.balance,
+    heldBalance: a.heldBalance,
+    status: ACCOUNT_STATUS_ACTIVE(),
+    dailyTransferred: a.dailyTransferred,
+    dailyLimit: a.dailyLimit,
+    createdAtMs: a.createdAtMs,
+    updatedAtMs: nowMs
+  };
+  Ok(newAcc)
+}

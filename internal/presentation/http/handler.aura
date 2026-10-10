@@ -1,0 +1,434 @@
+// ==============================================================================
+// Presentation Layer: HTTP REST Handlers & Controllers (Estilo Golang)
+// ==============================================================================
+
+import { Request, Response } from "./http_types";
+import { WalletUseCase } from "../../application/services/wallet_usecase";
+import { TransactionUseCase } from "../../application/services/transaction_usecase";
+import { LedgerUseCase } from "../../application/services/ledger_usecase";
+import { PrometheusMetricsAdapter } from "../../infrastructure/external/prometheus_metrics";
+import { SecurityAuditAdapter } from "../../infrastructure/external/audit_logger";
+import {
+  CreateAccountDTO,
+  DepositDTO,
+  WithdrawDTO,
+  TransferDTO,
+  FreezeAccountDTO
+} from "../../application/dto/wallet_dto";
+
+export struct WalletHttpHandler {
+  __aura_type: String,
+  walletUseCase: WalletUseCase,
+  txUseCase: TransactionUseCase,
+  ledgerUseCase: LedgerUseCase,
+  metricsAdapter: PrometheusMetricsAdapter,
+  auditAdapter: SecurityAuditAdapter
+};
+
+export fn NewWalletHttpHandler(
+  wUc: WalletUseCase,
+  tUc: TransactionUseCase,
+  lUc: LedgerUseCase,
+  metrics: PrometheusMetricsAdapter,
+  audit: SecurityAuditAdapter
+): WalletHttpHandler => {
+  return {
+    __aura_type: "WalletHttpHandler",
+    walletUseCase: wUc,
+    txUseCase: tUc,
+    ledgerUseCase: lUc,
+    metricsAdapter: metrics,
+    auditAdapter: audit
+  };
+};
+
+// Helper interno para obtener timestamp actual
+fn GetNowMs(): Int => {
+  1700000000000
+}
+
+// 1. GET /health
+fn (h: WalletHttpHandler) HandleHealth(req: Request, res: Response): Unit => {
+  http.json(res, 200, {
+    status: "UP",
+    service: "onion-wallet-microservice",
+    architecture: "Onion Architecture (Jeffrey Palermo)",
+    programmingStyle: "Golang-Idiomatic-Model (Pure DI, Receiver Methods, Duck Typing)",
+    language: "Aura Lang Native Engine (aurac)",
+    version: "1.0.0",
+    accountsCount: h.walletUseCase.GetTotalCount(),
+    transactionsCount: h.txUseCase.GetTotalCount(),
+    ledgerEntriesCount: h.ledgerUseCase.GetTotalCount()
+  });
+};
+
+// 2. GET /metrics
+fn (h: WalletHttpHandler) HandleMetrics(req: Request, res: Response): Unit => {
+  let summary = h.metricsAdapter.GetMetricsSummary();
+  http.json(res, 200, {
+    accountsCreated: summary.accountsCreated,
+    transfersCount: summary.transfersCount,
+    depositsCount: summary.depositsCount,
+    withdrawalsCount: summary.withdrawalsCount,
+    fraudRejectionsCount: summary.fraudRejectionsCount,
+    totalVolumeProcessed: summary.totalVolumeProcessed
+  });
+};
+
+// 3. GET /audit
+fn (h: WalletHttpHandler) HandleAuditLogs(req: Request, res: Response): Unit => {
+  let logs = h.auditAdapter.GetRecentLogs(50);
+  http.json(res, 200, {
+    totalLogs: h.auditAdapter.Count(),
+    logs: logs
+  });
+};
+
+// 4. POST /api/v1/accounts
+fn (h: WalletHttpHandler) HandleCreateAccount(req: Request, res: Response): Unit => {
+  let bodyStr = if (req.rawBody != ()) { req.rawBody } else { "{}" };
+  let payload = if (bodyStr != "" && bodyStr != "{}") {
+    JSON.parse(bodyStr)
+  } else {
+    {}
+  };
+
+  let ownerName = if (payload.ownerName != ()) { `${payload.ownerName}` } else { "" };
+  let ownerEmail = if (payload.ownerEmail != ()) { `${payload.ownerEmail}` } else { "" };
+  let currency = if (payload.currency != ()) { `${payload.currency}` } else { "USD" };
+  let initialBalance: Float = if (payload.initialBalance != ()) { payload.initialBalance } else { 0.0 };
+  let dailyLimit: Float = if (payload.dailyLimit != ()) { payload.dailyLimit } else { 25000.0 };
+
+  let dto: CreateAccountDTO = {
+    ownerName: ownerName,
+    ownerEmail: ownerEmail,
+    currency: currency,
+    initialBalance: initialBalance,
+    dailyLimit: dailyLimit
+  };
+
+  let createRes = h.walletUseCase.CreateAccount(dto, GetNowMs());
+  match createRes {
+    Ok(account) => {
+      http.json(res, 201, {
+        success: true,
+        message: "Cuenta creada exitosamente",
+        data: account
+      });
+    },
+    Err(err) => {
+      http.json(res, 400, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 5. GET /api/v1/accounts
+fn (h: WalletHttpHandler) HandleListAccounts(req: Request, res: Response): Unit => {
+  let listRes = h.walletUseCase.ListAccounts(50, 0);
+  match listRes {
+    Ok(accounts) => {
+      http.json(res, 200, {
+        success: true,
+        count: len(accounts),
+        data: accounts
+      });
+    },
+    Err(err) => {
+      http.json(res, 500, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 6. GET /api/v1/accounts/{id}
+fn (h: WalletHttpHandler) HandleGetAccount(req: Request, res: Response): Unit => {
+  let accountId = http.pathValue(req, "id");
+  let queryRes = h.walletUseCase.GetAccountById(accountId);
+  match queryRes {
+    Ok(account) => {
+      http.json(res, 200, {
+        success: true,
+        data: account
+      });
+    },
+    Err(err) => {
+      http.json(res, 404, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 7. POST /api/v1/accounts/{id}/freeze
+fn (h: WalletHttpHandler) HandleFreezeAccount(req: Request, res: Response): Unit => {
+  let accountId = http.pathValue(req, "id");
+  let bodyStr = if (req.rawBody != ()) { req.rawBody } else { "{}" };
+  let payload = if (bodyStr != "" && bodyStr != "{}") {
+    JSON.parse(bodyStr)
+  } else {
+    {}
+  };
+
+  let reason = if (payload.reason != ()) { `${payload.reason}` } else { "Bloqueo preventivo solicitado por el usuario o sistema" };
+  let freezeRes = h.walletUseCase.FreezeAccount(accountId, reason, GetNowMs());
+
+  match freezeRes {
+    Ok(account) => {
+      http.json(res, 200, {
+        success: true,
+        message: `Cuenta ${accountId} congelada`,
+        data: account
+      });
+    },
+    Err(err) => {
+      http.json(res, 400, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 8. POST /api/v1/accounts/{id}/unfreeze
+fn (h: WalletHttpHandler) HandleUnfreezeAccount(req: Request, res: Response): Unit => {
+  let accountId = http.pathValue(req, "id");
+  let unfreezeRes = h.walletUseCase.UnfreezeAccount(accountId, GetNowMs());
+
+  match unfreezeRes {
+    Ok(account) => {
+      http.json(res, 200, {
+        success: true,
+        message: `Cuenta ${accountId} reactivada`,
+        data: account
+      });
+    },
+    Err(err) => {
+      http.json(res, 400, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 9. POST /api/v1/transactions/deposit
+fn (h: WalletHttpHandler) HandleDeposit(req: Request, res: Response): Unit => {
+  let bodyStr = if (req.rawBody != ()) { req.rawBody } else { "{}" };
+  let payload = if (bodyStr != "" && bodyStr != "{}") {
+    JSON.parse(bodyStr)
+  } else {
+    {}
+  };
+
+  let accId = if (payload.accountId != ()) { `${payload.accountId}` } else { "" };
+  let amount: Float = if (payload.amount != ()) { payload.amount } else { 0.0 };
+  let desc = if (payload.description != ()) { `${payload.description}` } else { "Depósito bancario" };
+
+  let dto: DepositDTO = {
+    accountId: accId,
+    amount: amount,
+    description: desc
+  };
+
+  let depRes = h.txUseCase.ProcessDeposit(dto, GetNowMs());
+  match depRes {
+    Ok(tx) => {
+      http.json(res, 201, {
+        success: true,
+        message: "Depósito procesado exitosamente",
+        data: tx
+      });
+    },
+    Err(err) => {
+      http.json(res, 400, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 10. POST /api/v1/transactions/withdraw
+fn (h: WalletHttpHandler) HandleWithdrawal(req: Request, res: Response): Unit => {
+  let bodyStr = if (req.rawBody != ()) { req.rawBody } else { "{}" };
+  let payload = if (bodyStr != "" && bodyStr != "{}") {
+    JSON.parse(bodyStr)
+  } else {
+    {}
+  };
+
+  let accId = if (payload.accountId != ()) { `${payload.accountId}` } else { "" };
+  let amount: Float = if (payload.amount != ()) { payload.amount } else { 0.0 };
+  let desc = if (payload.description != ()) { `${payload.description}` } else { "Retiro de fondos" };
+
+  let dto: WithdrawDTO = {
+    accountId: accId,
+    amount: amount,
+    description: desc
+  };
+
+  let wthRes = h.txUseCase.ProcessWithdrawal(dto, GetNowMs());
+  match wthRes {
+    Ok(tx) => {
+      http.json(res, 201, {
+        success: true,
+        message: "Retiro procesado exitosamente",
+        data: tx
+      });
+    },
+    Err(err) => {
+      http.json(res, 400, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 11. POST /api/v1/transactions/transfer
+fn (h: WalletHttpHandler) HandleTransfer(req: Request, res: Response): Unit => {
+  let bodyStr = if (req.rawBody != ()) { req.rawBody } else { "{}" };
+  let payload = if (bodyStr != "" && bodyStr != "{}") {
+    JSON.parse(bodyStr)
+  } else {
+    {}
+  };
+
+  let srcId = if (payload.sourceAccountId != ()) { `${payload.sourceAccountId}` } else { "" };
+  let dstNum = if (payload.destinationAccountNumber != ()) { `${payload.destinationAccountNumber}` } else { "" };
+  let amount: Float = if (payload.amount != ()) { payload.amount } else { 0.0 };
+  let desc = if (payload.description != ()) { `${payload.description}` } else { "Transferencia entre billeteras" };
+
+  let dto: TransferDTO = {
+    sourceAccountId: srcId,
+    destinationAccountNumber: dstNum,
+    amount: amount,
+    description: desc
+  };
+
+  let xferRes = h.txUseCase.ProcessTransfer(dto, GetNowMs());
+  match xferRes {
+    Ok(tx) => {
+      http.json(res, 201, {
+        success: true,
+        message: "Transferencia ejecutada exitosamente con doble partida en Ledger",
+        data: tx
+      });
+    },
+    Err(err) => {
+      http.json(res, 400, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 12. GET /api/v1/transactions
+fn (h: WalletHttpHandler) HandleListTransactions(req: Request, res: Response): Unit => {
+  let listRes = h.txUseCase.ListRecentTransactions(50);
+  match listRes {
+    Ok(txs) => {
+      http.json(res, 200, {
+        success: true,
+        count: len(txs),
+        data: txs
+      });
+    },
+    Err(err) => {
+      http.json(res, 500, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 13. GET /api/v1/transactions/{id}
+fn (h: WalletHttpHandler) HandleGetTransaction(req: Request, res: Response): Unit => {
+  let txId = http.pathValue(req, "id");
+  let queryRes = h.txUseCase.GetTransactionById(txId);
+  match queryRes {
+    Ok(tx) => {
+      http.json(res, 200, {
+        success: true,
+        data: tx
+      });
+    },
+    Err(err) => {
+      http.json(res, 404, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 14. GET /api/v1/ledger/accounts/{id}
+fn (h: WalletHttpHandler) HandleGetAccountLedger(req: Request, res: Response): Unit => {
+  let accountId = http.pathValue(req, "id");
+  let queryRes = h.ledgerUseCase.GetAccountLedger(accountId);
+  match queryRes {
+    Ok(entries) => {
+      http.json(res, 200, {
+        success: true,
+        accountId: accountId,
+        count: len(entries),
+        data: entries
+      });
+    },
+    Err(err) => {
+      http.json(res, 404, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 15. GET /api/v1/ledger/accounts/{id}/reconcile
+fn (h: WalletHttpHandler) HandleReconcileAccount(req: Request, res: Response): Unit => {
+  let accountId = http.pathValue(req, "id");
+  let recRes = h.ledgerUseCase.ReconcileAccount(accountId, GetNowMs());
+  match recRes {
+    Ok(summary) => {
+      http.json(res, 200, {
+        success: true,
+        accountId: accountId,
+        reconciliation: summary
+      });
+    },
+    Err(err) => {
+      http.json(res, 400, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};
+
+// 16. GET /api/v1/ledger
+fn (h: WalletHttpHandler) HandleListLedger(req: Request, res: Response): Unit => {
+  let listRes = h.ledgerUseCase.ListAllEntries();
+  match listRes {
+    Ok(entries) => {
+      http.json(res, 200, {
+        success: true,
+        count: len(entries),
+        data: entries
+      });
+    },
+    Err(err) => {
+      http.json(res, 500, {
+        success: false,
+        error: err
+      });
+    }
+  };
+};

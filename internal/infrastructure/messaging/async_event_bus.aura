@@ -1,0 +1,52 @@
+// ==============================================================================
+// Infrastructure Layer: Async Event Bus Adapter (Pub/Sub Event Broker)
+// ==============================================================================
+
+import { DomainEvent } from "../../domain/events";
+
+export struct AsyncEventBus {
+  __aura_type: String,
+  eventLog: []DomainEvent,
+  mu: Mutex
+};
+
+export fn NewAsyncEventBus(): AsyncEventBus => {
+  let empty: []DomainEvent = [];
+  return {
+    __aura_type: "AsyncEventBus",
+    eventLog: empty,
+    mu: Mutex.new()
+  };
+};
+
+fn (b: AsyncEventBus) Publish(event: DomainEvent): Result<Unit, String> => {
+  b.mu.lock();
+  defer b.mu.unlock();
+
+  b.eventLog = append(b.eventLog, event);
+  println(`      ⚡ [EventBus] Evento publicado: [${event.eventType}] (ID: ${event.eventId}) para Aggregate: ${event.aggregateId}`);
+  Ok(())
+}
+
+fn (b: AsyncEventBus) GetEventCount(): Int => {
+  b.mu.lock();
+  defer b.mu.unlock();
+  len(b.eventLog)
+}
+
+fn (b: AsyncEventBus) GetRecentEvents(limit: Int): []DomainEvent => {
+  b.mu.lock();
+  defer b.mu.unlock();
+
+  let maxLimit = if (limit <= 0) { 20 } else { limit };
+  let mut recent: []DomainEvent = [];
+  let total = len(b.eventLog);
+
+  let mut i = total - 1;
+  while i >= 0 && len(recent) < maxLimit {
+    recent = append(recent, b.eventLog[i]);
+    i = i - 1;
+  }
+
+  recent
+}

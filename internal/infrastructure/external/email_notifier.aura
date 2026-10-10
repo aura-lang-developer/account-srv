@@ -1,0 +1,38 @@
+// ==============================================================================
+// Infrastructure Layer: Email & Notification Adapter (Notificaciones Externas)
+// ==============================================================================
+
+export struct EmailNotifier {
+  __aura_type: String,
+  senderDomain: String
+};
+
+export fn NewEmailNotifier(domain: String): EmailNotifier => {
+  let d = if (domain == "") { "notifications.aura-pay.io" } else { domain };
+  return {
+    __aura_type: "EmailNotifier",
+    senderDomain: d
+  };
+};
+
+fn (n: EmailNotifier) SendTransferNotification(
+  email: String,
+  txId: String,
+  amount: Float,
+  currency: String,
+  desc: String
+): Result<Unit, String> => {
+  println(`      ✉️  [EmailNotifier @ ${n.senderDomain}] Notificación de Transferencia -> ${email}`);
+  println(`          └─ TX: ${txId} | Monto: ${amount} ${currency} | ${desc}`);
+  Ok(())
+}
+
+fn (n: EmailNotifier) SendSecurityAlert(
+  email: String,
+  alertType: String,
+  message: String
+): Result<Unit, String> => {
+  println(`      🚨 [EmailNotifier @ ${n.senderDomain}] ALERTA DE SEGURIDAD (${alertType}) -> ${email}`);
+  println(`          └─ Detalle: ${message}`);
+  Ok(())
+}

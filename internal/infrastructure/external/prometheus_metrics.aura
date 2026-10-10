@@ -1,0 +1,81 @@
+// ==============================================================================
+// Infrastructure Layer: Prometheus Metrics & Telemetry Adapter
+// ==============================================================================
+
+export struct MetricsTelemetrySummary {
+  accountsCreated: Int,
+  transfersCount: Int,
+  depositsCount: Int,
+  withdrawalsCount: Int,
+  fraudRejectionsCount: Int,
+  totalVolumeProcessed: Float
+};
+
+export struct PrometheusMetricsAdapter {
+  __aura_type: String,
+  accountsCreated: Int,
+  transfersCount: Int,
+  depositsCount: Int,
+  withdrawalsCount: Int,
+  fraudRejectionsCount: Int,
+  totalVolumeProcessed: Float,
+  mu: Mutex
+};
+
+export fn NewPrometheusMetricsAdapter(): PrometheusMetricsAdapter => {
+  return {
+    __aura_type: "PrometheusMetricsAdapter",
+    accountsCreated: 0,
+    transfersCount: 0,
+    depositsCount: 0,
+    withdrawalsCount: 0,
+    fraudRejectionsCount: 0,
+    totalVolumeProcessed: 0.0,
+    mu: Mutex.new()
+  };
+};
+
+fn (m: PrometheusMetricsAdapter) IncrementCounter(metricName: String, label: String): Unit => {
+  m.mu.lock();
+  defer m.mu.unlock();
+
+  if (metricName == "accounts_created_total") {
+    m.accountsCreated = m.accountsCreated + 1;
+  } else if (metricName == "transactions_processed_total") {
+    if (label == "TRANSFER") {
+      m.transfersCount = m.transfersCount + 1;
+    } else if (label == "DEPOSIT") {
+      m.depositsCount = m.depositsCount + 1;
+    } else if (label == "WITHDRAWAL") {
+      m.withdrawalsCount = m.withdrawalsCount + 1;
+    }
+  } else if (metricName == "transactions_rejected_fraud") {
+    m.fraudRejectionsCount = m.fraudRejectionsCount + 1;
+  }
+
+  println(`      📈 [Prometheus] Métrica actualizada: ${metricName}{label="${label}"} +1`);
+}
+
+fn (m: PrometheusMetricsAdapter) RecordAmount(metricName: String, amount: Float): Unit => {
+  m.mu.lock();
+  defer m.mu.unlock();
+
+  m.totalVolumeProcessed = m.totalVolumeProcessed + amount;
+  println(`      📊 [Prometheus] Volumen registrado: ${metricName} +${amount}`);
+}
+
+fn (m: PrometheusMetricsAdapter) GetMetricsSummary(): MetricsTelemetrySummary => {
+  m.mu.lock();
+  defer m.mu.unlock();
+
+  let summary: MetricsTelemetrySummary = {
+    accountsCreated: m.accountsCreated,
+    transfersCount: m.transfersCount,
+    depositsCount: m.depositsCount,
+    withdrawalsCount: m.withdrawalsCount,
+    fraudRejectionsCount: m.fraudRejectionsCount,
+    totalVolumeProcessed: m.totalVolumeProcessed
+  };
+
+  summary
+}

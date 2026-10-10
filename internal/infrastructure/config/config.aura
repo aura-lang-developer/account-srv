@@ -1,0 +1,39 @@
+// ==============================================================================
+// Infrastructure Layer: Application Configuration (Variables de Entorno)
+// ==============================================================================
+
+export struct AppConfig {
+  serviceName: String,
+  version: String,
+  environment: String,
+  serverPort: String,
+  defaultDailyLimit: Float,
+  riskThreshold: Float
+};
+
+export fn LoadConfig(): AppConfig => {
+  let port = if (os.env("PORT") != "") {
+    os.env("PORT")
+  } else if (os.env("AURA_PORT") != "") {
+    os.env("AURA_PORT")
+  } else {
+    "8080"
+  };
+
+  let env = if (os.env("APP_ENV") != "") {
+    os.env("APP_ENV")
+  } else {
+    "development"
+  };
+
+  let cfg: AppConfig = {
+    serviceName: "onion-wallet-microservice",
+    version: "1.0.0",
+    environment: env,
+    serverPort: port,
+    defaultDailyLimit: 25000.0,
+    riskThreshold: 0.85
+  };
+
+  cfg
+};
